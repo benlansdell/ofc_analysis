@@ -1,0 +1,184 @@
+---
+title: "EDA"
+output: html_notebook
+---
+
+### Goals of notebook
+
+* Confirm format of data. Any data is missing?
+* What is the duration of the trials?
+* Just examine one recording right now. Can change the file and load others to compare later
+* Look at the signals from trial to trial. This may inform the normalization question
+* Make some plots of the signals from different cells
+
+```{bash}
+ls /media/core/core_operations/ImageAnalysisScratch/Schwarz/Cameron/ImagingData/
+```
+
+Choose a file from the above
+```{r}
+fn = 'final_060603.Rds'
+```
+
+### Basic data checks
+
+Load the data
+```{r}
+library(data.table)
+library(plotly)
+library(ggplot2)
+library(htmltools)
+
+setwd('/home/blansdel/projects/unlearn')
+
+path = '/media/core/core_operations/ImageAnalysisScratch/Schwarz/Cameron/ImagingData/'
+dt = readRDS(paste(path, fn, sep = ''))
+dt
+```
+
+How many sessions, animals, rewards and events are there?
+
+```{r}
+dt[, .N, by=.(Session, Animal, Reward)]
+```
+
+```{r}
+dt[, .(nframes = uniqueN(frame)), by=.(event)]
+```
+
+How long are each of the trials?
+```{r}
+dt[,.(nframes = uniqueN(`frame`)), by = .(`Trial Number`)]
+```
+
+Are there any missing time stamps/frames per cell?
+
+```{r}
+dt[, .(nframes = uniqueN(`frame`)),by = .(CellID)]
+```
+
+Are there any NAs?
+
+```{r}
+colSums(is.na(dt))
+```
+
+### Some exploration
+
+Plot the signals for some randomly chosen cells
+
+```{r}
+n_cells = 5
+rnd_cells <- sample(unique(dt$CellID), n_cells, replace=F)
+plots <- lapply(rnd_cells, function(idx) {
+  plot_ly(data = dt[CellID == idx], x = ~Time, y = ~dff, type = "scatter", mode = "lines") %>%
+    layout(title=sprintf("Cell #%s", idx))
+})
+tagList(plots)
+```
+
+Summarize activity for the cells. Make boxplots of signal for each cell
+
+```{r fig1, fig.height = 20, fig.width = 5}
+p <- ggplot(dt, aes(x=CellID, y=dff)) + geom_boxplot() + coord_flip()
+
+p
+```
+
+What does the experiment progression look like for each trial?
+
+```{r}
+  plot_ly(data = dt[CellID == "1"], x = ~Time, y = ~`Trial Number`, color = ~event, type = "scatter", mode = "markers") 
+```
+
+### Visualization of signal at spout events
+
+Only take the columns we need
+
+```{r}
+ds = dt[,.(frame, CellID, `Trial Number`, event, dff)]
+ds
+```
+
+Make indicator variables for rspout_first and lspout_first
+
+```{r}
+ds[, rspout_first := as.integer(event == 'rspout_first')]
+ds[, lspout_first := as.integer(event == 'lspout_first')]
+ds
+```
+
+For each trial, count to start of each r/lspout events
+
+```{r}
+ds[event == 'rspout_first', .SD[which.min(frame)], by = `Trial Number`]
+```
+
+```{r}
+ds[event == 'lspout_first', .SD[which.min(frame)], by = `Trial Number`]
+```
+
+```{r}
+events_of_interest = c('lspout_first', 'rspout_first')
+ds[, frame_offset_spout := frame - min(.SD[event %in% events_of_interest, frame]), by = `Trial Number`]
+ds
+```
+
+Now we can study the signal relative to these events for each cell. For each cell, we have 12 traces. 
+
+```{r fig2, fig.height = 10, fig.width = 5}
+window = 100
+n_cells = 15
+rnd_cells <- sample(unique(dt$CellID), n_cells, replace=F)
+
+ggplot(ds[CellID %in% rnd_cells & frame_offset_spout > -window & frame_offset_spout < window], 
+       aes(x = frame_offset_spout, y = dff, group = `Trial Number`, color = `event`)) + geom_line() + facet_grid(CellID ~.)
+
+```
+```{r fig3, fig.height = 10, fig.width = 5}
+window = 1000
+n_cells = 15
+rnd_cells <- sample(unique(dt$CellID), n_cells, replace=F)
+
+ggplot(ds[CellID %in% rnd_cells & frame_offset_spout > -window & frame_offset_spout < window], 
+       aes(x = frame_offset_spout, y = dff, group = `Trial Number`, color = `event`)) + geom_line() + facet_grid(CellID ~.)
+
+```
+
+Heatmap of the mean signal for each cell over all trials (regardless of left or right spout)
+
+```{r fig4, fig.height = 10, fig.width = 5}
+window = 100
+p = ggplot(ds[frame_offset_spout > -window & frame_offset_spout < window, .(mn = mean(dff)), by = .(frame_offset_spout, CellID)],
+           aes(x=frame_offset_spout, y=CellID, fill = mn)) + geom_tile(show.legend = FALSE) + scale_fill_distiller(palette = "BrBG")
+  
+p
+```
+
+Wider heatmap of the mean signal for each cell over all trials (regardless of left or right spout)
+
+```{r fig5, fig.height = 10, fig.width = 5}
+window = 1000
+
+n_col = 10
+
+color_palette <- colorRampPalette(c("#3794bf", "#FFFFFF", "#df8640"))(n_col-1)
+
+p = ggplot(ds[frame_offset_spout > -window & frame_offset_spout < window, .(mn = mean(dff)), by = .(frame_offset_spout, CellID)],
+           aes(x=frame_offset_spout, y=CellID, fill = mn)) + geom_tile(show.legend = FALSE) +   scale_fill_distiller(palette = "BrBG")
+p
+```
+
+
+### TODO
+
+* Fix colors of plots above
+* Do separate analysis for rspout and lspout events
+* Make more general pipeline, make plots for other events
+* Sort plots by cell responsiveness
+
+### Save for loading in later notebooks
+
+```{r}
+save(ds, file = sprintf("./intermediate/0_datatablesfor_%s", fn))
+```
