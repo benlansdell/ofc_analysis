@@ -5,13 +5,11 @@ output:
     df_print: paged
 ---
 
-### Goals of notebook
+### In this notebook
 
-* Basic data checks... any data is missing?
-* Recording structure
-* Examine just one recording right here. Can change the file and load others to compare later
-* Look at the signals from trial to trial. This may inform normalization questions
-* Make some plots of the signals from different cells
+* Examine just one recording. Recordings are combined in another notebook
+* Basic data checks
+* Look at the signals from trial to trial near events of interest
 
 ```{bash}
 ls /media/core/core_operations/ImageAnalysisScratch/Schwarz/Cameron/ImagingData/
@@ -22,7 +20,7 @@ Choose a file from the above to analyze
 fn = 'final_060603.Rds'
 ```
 
-And set this to your local working directory
+And set local working directory (change to your own)
 ```{r}
 setwd('/home/blansdel/projects/roc_cell_analysis')
 ```
@@ -36,13 +34,14 @@ library(plotly)
 library(ggplot2)
 library(htmltools)
 
+source('helper.R')
+
 path = '/media/core/core_operations/ImageAnalysisScratch/Schwarz/Cameron/ImagingData/'
 dt = readRDS(paste(path, fn, sep = ''))
 dt
 ```
 
 How many sessions, animals, rewards and events are there?
-
 ```{r}
 dt[, .N, by=.(Session, Animal, Reward)]
 ```
@@ -109,21 +108,13 @@ We'll analyze activity at the start of these events:
 events_of_interest = c('lspout_first', 'rspout_first')
 ```
 
-Only take the columns we need.
-```{r}
-ds = dt[,.(frame, CellID, `Trial Number`, event, dff)]
-ds
-```
-
-Make indicator variables for the events of interest. 
-```{r}
-for (evt in events_of_interest) {
-  ds[, (evt) := as.integer(event == evt)]
-}
-```
+The `preprocess_dt` function does the following:
+* Makes a truncated data table with only the columns we need for this analyis
+* Makes indicator variables for the events of interest 
+* Zeros the frame count for each trial at the _first_ occurance of one of the events. If there are multiple transitions into the events throughout the trial, the latter occurances will be ignored here. 
 
 ```{r}
-ds
+ds = preprocess_dt(dt, events_of_interest)
 ```
 
 For each trial, where does each event of interest occur?
@@ -133,12 +124,6 @@ for (evt in events_of_interest) {
 }
 ```
 
-Zero the frame count for each trial at the _first_ occurance of one of the events. If there are multiple transitions into the events throughout the trial, the latter occurances will be ignored here. 
-```{r}
-ds[, frame_offset_event := frame - min(.SD[event %in% events_of_interest, frame]), by = `Trial Number`]
-ds
-```
-
 Now we can study the signal relative to these events for each cell. For each cell, we have 12 traces. 
 ```{r fig3, fig.height = 10, fig.width = 5}
 window = 1000
@@ -146,7 +131,9 @@ n_cells = 15
 rnd_cells <- sample(unique(dt$CellID), n_cells, replace=F)
 
 ggplot(ds[CellID %in% rnd_cells & frame_offset_event > -window & frame_offset_event < window], 
-       aes(x = frame_offset_event, y = dff, group = `Trial Number`, color = `event`)) + geom_line() + facet_grid(CellID ~.)
+       aes(x = frame_offset_event, y = dff, group = `Trial Number`, color = `event`)) +
+  geom_line() +
+  facet_grid(CellID ~.)
 ```
 
 Zooming in to closer
@@ -156,7 +143,9 @@ n_cells = 15
 rnd_cells <- sample(unique(dt$CellID), n_cells, replace=F)
 
 ggplot(ds[CellID %in% rnd_cells & frame_offset_event > -window & frame_offset_event < window], 
-       aes(x = frame_offset_event, y = dff, group = `Trial Number`, color = `event`)) + geom_line() + facet_grid(CellID ~.)
+       aes(x = frame_offset_event, y = dff, group = `Trial Number`, color = `event`)) +
+  geom_line() +
+  facet_grid(CellID ~.)
 ```
 
 Heatmap of the mean dff signal for each cell over all trials (regardless of which event it is)
@@ -164,7 +153,11 @@ Heatmap of the mean dff signal for each cell over all trials (regardless of whic
 window = 1000
 
 p = ggplot(ds[frame_offset_event > -window & frame_offset_event < window, .(mn = mean(dff)), by = .(frame_offset_event, CellID)],
-           aes(x=frame_offset_event, y=CellID, fill = mn)) + geom_tile(show.legend = FALSE) +   scale_fill_distiller(palette = "BrBG") + theme(axis.ticks.y = element_blank(), axis.text.y = element_blank(), axis.title.y = element_blank())
+           aes(x=frame_offset_event, y=CellID, fill = mn)) +
+  geom_tile(show.legend = FALSE) +
+  scale_fill_distiller(palette = "BrBG") +
+  theme(axis.ticks.y = element_blank(), axis.text.y = element_blank(), axis.title.y = element_blank())
+
 p
 ```
 
@@ -204,7 +197,10 @@ for (evt in events_of_interest) {
   
   dss = ds[frame_offset_event > -window & frame_offset_event < window & `Trial Number` %in% trials, .(mn = mean(dff)), by = .(frame_offset_event, CellID)]; 
   
-  p = ggplot(dss, aes(x=frame_offset_event, y=CellID, fill = mn)) + geom_tile(show.legend = FALSE) + scale_fill_distiller(palette = "BrBG") + theme(axis.ticks.y = element_blank(), axis.text.y = element_blank(), axis.title.y = element_blank()) + ggtitle(sprintf("%s (averaged over %d trials; reward is on the %s)", evt, length(trials), reward))
+  p = ggplot(dss, aes(x=frame_offset_event, y=CellID, fill = mn)) + 
+    geom_tile(show.legend = FALSE) + scale_fill_distiller(palette = "BrBG") + 
+    theme(axis.ticks.y = element_blank(), axis.text.y = element_blank(), axis.title.y = element_blank()) +
+    ggtitle(sprintf("%s (averaged over %d trials; reward is on the %s)", evt, length(trials), reward))
 
   print(p)  
 }
@@ -214,12 +210,8 @@ for (evt in events_of_interest) {
 
 For each cell and each trial, cluster dff 
 
+
+
 ### TODO
 
 * Cluster analysis on traces
-
-### Save ds datatable for loading in later notebooks
-
-```{r}
-save(ds, file = sprintf("./intermediate/0_datatablesfor_%s", fn))
-```
