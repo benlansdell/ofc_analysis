@@ -18,7 +18,6 @@ fn = 'final_060603.Rds'
 ```
 
 Load data
-
 ```{r}
 load(file = sprintf("./intermediate/0_datatablesfor_%s", fn))
 ```
@@ -27,8 +26,10 @@ Imports
 ```{r}
 library(hash)
 library(ROCR)
-#And others...
 
+library(foreach)
+library(parallel)
+library(doParallel)
 ```
 
 The loaded data table
@@ -39,13 +40,14 @@ ds
 ### Preprocessing of signal
 
 How much variability is there between trials for a given cell?
-
 ```{r}
 a = ds[,.(mn = mean(dff), sd = sd(dff)), by = .(CellID, `Trial Number`)]
 a[CellID == 1]
 ```
 
 How should we normalize? In particular, should we normalize by trial?
+
+Some thoughts:
 
 If the question is: is this cell responsive on this particular trial, then we can indeed normalize over each trial and run the ROC analysis over each cell. Although, as argued below, the scaling in this case doesn't matter, so this shouldn't make any difference. Further, on a per trial basis, we have less data to generate useful ROC curves.
 
@@ -62,47 +64,44 @@ ds[, dff_zs := (dff - mean(dff))/sd(dff), by = `CellID`]
 ds
 ```
 
-### ROC curves
+### ROC curves measuring responsiveness to events of interest
 
 Compute the ROC curves. The signal is treated as a binary classifier for the experimental state of interest. Here, the states of interest are the first phases of the l/r spout states. After normalizing, we treat the signal as a simple binary classifier. That is, if it is above a given amount then it counts as 1, otherwise 0. We can use this to generate an ROC curve, which indicates how well that cell classifies times as the event of interest or not. The ROC AUC is used as a measure of cell responsiveness. 
-
-```{r}
-#See comment section here: https://rviews.rstudio.com/2019/03/01/some-r-packages-for-roc-curves/
-#This is simple, but not efficient for large lists...Better to use ROCR package, as below
-simple_roc <- function(labels, scores){
-Labels <- labels[order(scores, decreasing=TRUE)]
-unique(data.frame(
-FPR=cumsum(!Labels)/sum(!Labels),
-TPR=cumsum(Labels)/sum(Labels))
-)}
-```
 
 Make a dictionary of ROC curves for each cellID
 ```{r}
 roc_curves = hash()
 per_cell_ds = split(ds, f = ds$CellID)
 cells = unique(ds$CellID)
+
+evevents_of_interest = c("lspout_first", "rspout_first")
 ```
 
 ```{r}
-for (dss in per_cell_ds) {
-  p = performance(prediction(dss$dff_zs, dss$rspout_first), "tpr", "fpr") 
-  q = performance(prediction(dss$dff_zs, dss$rspout_first), "auc") 
-  roc_curves[dss[1,CellID]] = list(p, q)
+for (evt in events_of_interest) {
+  for (dss in per_cell_ds) {
+    p = performance(prediction(dss$dff_zs, dss[,..evt]), "tpr", "fpr") 
+    q = performance(prediction(dss$dff_zs, dss[,..evt]), "auc") 
+    roc_curves[paste(evt, dss[1,CellID])] = list(p, q)
+  }
 }
 ```
 
 Plot the ROC curves for all cells
-```{r fig6, fig.height = 6, fig.width = 6}
-plot(roc_curves[['1']][[1]])
-lapply(cells, function(x) plot(roc_curves[[x]][[1]], add = TRUE));
+```{r fig1, fig.height = 6, fig.width = 6}
+for (evt in events_of_interest) {
+  plot(roc_curves[[paste(evt, '1')]][[1]])
+  lapply(cells, function(x) plot(roc_curves[[paste(evt,x)]][[1]], add = TRUE));
+}
 ```
 
-Now we can make a new data table to house the results of our analysis...
-
+Make a new data table to house the results of our analysis.
 ```{r}
-aucs = sapply(cells, function(x) roc_curves[[x]][[2]]@y.values[[1]])
-dt_roc = data.table(CellID = cells, AUC = aucs, null_quantile = numeric(), pos_resp = numeric(), neg_resp = numeric())
+dt_roc = data.table(CellID = cells)
+for (evt in events_of_interest){
+  aucs = sapply(cells, function(x) roc_curves[[paste(evt, x)]][[2]]@y.values[[1]])
+  dt_roc[,eval(paste(evt, 'AUC', sep = "_")) := aucs]
+}
 dt_roc
 ```
 
@@ -115,7 +114,6 @@ This gives us a null distribution from which we can judge an AUC as significant 
 (In the paper [1], N = 1000)
 
 First confirm what the method looks like for a few cells.
-
 ```{r}
 N = 50
 
@@ -124,97 +122,139 @@ cycle = function (x,i) c(x[-(0:i)], x[0:i])
 n_cells = 1
 cell <- sample(unique(ds$CellID), n_cells, replace=F)
 
-#Can think about how to parallelize this...
 print("Computing null distributions for AUC for cell:")
 print(cell)
 
 dss = ds[CellID == cell]
-aucs = c()
-pred_real = performance(prediction(dss$dff_zs, dss$rspout_first), "tpr", "fpr")
-plot(pred_real, colorize = TRUE)
-for (j in 1:N) {
-  #Perform shuffle of data...
-  rand_idx = ceiling(runif(1, 0, length(dss$dff_zs)))
-  shuffle = cycle(dss$dff_zs, rand_idx)
-  pred = performance(prediction(shuffle, dss$rspout_first), "tpr", "fpr")
-  auc = performance(prediction(shuffle, dss$rspout_first), "auc")@y.values[[1]]
-  aucs = c(aucs, auc)
-  plot(pred, add = TRUE)
+
+for (evt in events_of_interest) {
+  aucs = c()
+  pred_real = performance(prediction(dss$dff_zs, dss[,..evt]), "tpr", "fpr")
+  plot(pred_real, colorize = TRUE)
+  colname = paste(evt, 'AUC', sep = "_")
+  for (j in 1:N) {
+    #Perform shuffle of data...
+    rand_idx = ceiling(runif(1, 0, length(dss$dff_zs)))
+    shuffle = cycle(dss$dff_zs, rand_idx)
+    pred = performance(prediction(shuffle, dss[,..evt]), "tpr", "fpr")
+    auc = performance(prediction(shuffle, dss[,..evt]), "auc")@y.values[[1]]
+    aucs = c(aucs, auc)
+    plot(pred, add = TRUE)
+  }
+  
+  this_auc = dt_roc[CellID == cell, ..colname]
+  quantile = sum(aucs < this_auc[[1]])/N
+  
+  plot(pred_real, colorize = TRUE, add = TRUE)
+  title(sprintf("Event: %s, Cell %s, AUC: %f, quantile: %f", evt, cell, this_auc, quantile))
 }
-
-this_auc = dt_roc[CellID == cell, AUC]
-quantile = sum(aucs < this_auc)/N
-
-plot(pred_real, colorize = TRUE, add = TRUE)
-title(sprintf("Cell %s, AUC: %f, quantile: %f", cell, this_auc, quantile))
 ```
 
 ```{r}
 hist(aucs, breaks = 10)
-title(sprintf("Cell %s", cell))
+title(sprintf("Event: %s, Cell %s", evt, cell))
 ```
 
-Repeat for all cells
-
+Now repeat for all cells
 ```{r}
-library(foreach)
-library(parallel)
-library(doParallel)
-
-#Either: save each cell data table in file (fread, fwrite), or pass list of cells
-
+#Create cluster
 cl <- makeCluster(20)
 registerDoParallel(cl)
 ```
 
 ```{r}
+#Either: save each cell data table in file (fread, fwrite), or pass list of cells
+
+#Here we pass a list of cells, and each worker operates on the corresponding data table. 
+#This is slow (and memory inefficient) because each worker loads the whole list 'per_cell_dss'
+
 N = 1000
 null_rocs = foreach(idx = 1:length(per_cell_ds), .packages = c("data.table", "ROCR")) %dopar% {
   
   dss = per_cell_ds[[idx]]
   cell = dss[1, CellID]
-  aucs = c()
+  dt_null = data.table(CellID = cell)
   print(cell)
-  for (j in 1:N) {
-    #Perform shuffle of data...
-    rand_idx = ceiling(runif(1, 0, length(dss$dff_zs)))
-    shuffle = cycle(dss$dff_zs, rand_idx)
-    auc = performance(prediction(shuffle, dss$rspout_first), "auc")@y.values[[1]]
-    aucs = c(aucs, auc)
+  for (evt in events_of_interest) {
+    aucs = c()
+    for (j in 1:N) {
+      #Perform shuffle of data...
+      rand_idx = ceiling(runif(1, 0, length(dss$dff_zs)))
+      shuffle = cycle(dss$dff_zs, rand_idx)
+      auc = performance(prediction(shuffle, dss[,..evt]), "auc")@y.values[[1]]
+      aucs = c(aucs, auc)
+    }
+    colname = paste(evt, 'AUC', sep = "_")
+    this_auc = dt_roc[CellID == cell, ..colname]
+    quantile = sum(aucs < this_auc[[1]])/N
+    dt_null[,eval(paste('null_quantile', evt, sep = "_")) := quantile]
   }
-  this_auc = dt_roc[CellID == cell, AUC]
-  quantile = sum(aucs < this_auc)/N
-  return(data.table(CellID = cell, null_quantile = quantile))
+  return(dt_null)
 }
 
 ```
 
 ```{r}
-#null_rocs = rbindlist(null_rocs)
-dt_roc[,null_quantile := NULL]
+null_rocs = rbindlist(null_rocs)
+dt_roc[,null_quantile_rspout_first := NULL]
+dt_roc[,null_quantile_lspout_first := NULL]
 dt_roc = merge(dt_roc, null_rocs, by = 'CellID')
 dt_roc
 ```
 
-
 ```{r}
 alpha = 0.05
 
-dt_roc[,pos_resp := null_quantile > 1-alpha]
-dt_roc[,neg_resp := null_quantile < alpha]
-```
-
-```{r}
-dt_roc
+for (evt in events_of_interest) {
+  colname = paste('null_quantile', evt, sep = "_")
+  dss = dt_roc[,colname, with = FALSE]
+  dt_roc[,(paste(evt, 'pos_resp', sep='_')) := (dss > 1-alpha)]
+  dt_roc[,(paste(evt, 'neg_resp', sep='_')) := (dss < alpha)]
+}
 ```
 
 ### Summarize the significantly responding cells
 
-How many positively and negatively responding cells are there? Out of 192
-
+How many positively and negatively responding cells are there?
 ```{r}
-print(sum(dt_roc$pos_resp))
-print(sum(dt_roc$neg_resp))
+for (evt in events_of_interest) {
+print(evt)
+cn_pos = paste(evt, 'pos_resp', sep = '_')
+cn_neg = paste(evt, 'neg_resp', sep = '_')
+print(sprintf("Positively responding cells: %d", sum(dt_roc[[cn_pos]])))
+print(sprintf("Negatively responding cells: %d", sum(dt_roc[[cn_neg]])))
+}
+
+print(sprintf("Out of %d cells", length(cells)))
+```
+
+### Plot activity of cells sorted by responsiveness
+
+```{r fig6, fig.height = 10, fig.width = 5}
+window = 1000
+
+events_of_interest = c("lspout_first", "rspout_first")
+reward = "left"
+
+for (evt in events_of_interest) {
+  trials = ds[event == evt, .SD[which.min(frame)], by = `Trial Number`]$`Trial Number`
+  
+  dss = ds[frame_offset_event > -window & frame_offset_event < window & `Trial Number` %in% trials, .(mn = mean(dff)), by = .(frame_offset_event, CellID)]
+  
+  #Sort by responsiveness
+  dss = merge(dss, dt_roc, by='CellID')
+  colname = paste('null_quantile', evt, sep = "_")
+  null_quantile = dss[[colname]]
+  dss[,null_order := null_quantile]
+
+  p = ggplot(dss, aes(x=frame_offset_event, y=reorder(CellID, null_order), fill = mn)) + 
+    geom_tile(show.legend = FALSE) + 
+    scale_fill_distiller(palette = "BrBG") + 
+    theme(axis.ticks.y = element_blank(), axis.text.y = element_blank(), axis.title.y = element_blank()) +
+    ggtitle(sprintf("%s (averaged over %d trials; reward is on the %s)", evt, length(trials), reward))
+
+  print(p)  
+}
 ```
 
 ### Analysis question: ROC curves, probability and deconvolution
@@ -252,9 +292,7 @@ Thus in theory the method is scale invariant. However, when performed numericall
 
 ### TODO
 
-* Redo this analysis for both lspout and rspout events
-* Run for higher N
-* Make more general analysis pipeline that can handle any event of interest, pool data over multiple recordings
+* Pool data over multiple recordings
 * Consider alternative methods that may also work: 
 ** Correlation rank
 ** Bandpass filter before giving to ROC method... removes slow fluctuations in intensity?
