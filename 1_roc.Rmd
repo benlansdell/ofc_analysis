@@ -39,6 +39,7 @@ Load data
 path = '/media/core/core_operations/ImageAnalysisScratch/Schwarz/Cameron/ImagingData/'
 dt = readRDS(paste(path, fn, sep = ''))
 ds = preprocess_dt(dt, events_of_interest)
+reward = dt[1,Reward]
 ```
 
 The loaded data table
@@ -63,7 +64,7 @@ ds
 
 ### ROC curves measuring responsiveness to events of interest
 
-Compute the ROC curves. The signal is treated as a binary classifier for the experimental state of interest. Here, the states of interest are the first phases of the l/r spout states. After normalizing, we treat the signal as a simple binary classifier. That is, if it is above a given amount then it counts as 1, otherwise 0. We can use this to generate an ROC curve, which indicates how well that cell classifies times as the event of interest or not. The ROC AUC is used as a measure of cell responsiveness. 
+Compute the ROC curves. The signal is treated as a binary classifier for the experimental state of interest. That is, if it is above a given amount then it counts as 1, otherwise 0. We can use this to generate an ROC curve, which indicates how well that cell classifies times as the event of interest. The ROC AUC is used as a measure of cell responsiveness. 
 
 Make a dictionary of ROC curves for each cellID
 ```{r}
@@ -87,10 +88,15 @@ Plot the ROC curves for all cells
 for (evt in events_of_interest) {
   plot(roc_curves[[paste(evt, '1')]][[1]])
   lapply(cells, function(x) plot(roc_curves[[paste(evt,x)]][[1]], add = TRUE));
+  title(evt)
 }
 ```
 
-Make a new data table to house the results of our analysis.
+### Generation of null-distributions for each cell
+
+Now, for each cell, we perform N random shifts of the signal, and recompute the AUC. This gives us a null distribution from which we can judge an AUC as significant or not. (In the paper [1], N = 1000)
+
+First, make a new data table to house the results of our analysis.
 ```{r}
 dt_roc = data.table(CellID = cells)
 for (evt in events_of_interest){
@@ -103,15 +109,7 @@ for (evt in events_of_interest){
 dt_roc
 ```
 
-### Generation of null-distributions for each cell
-
-Now, for each cell, we perform N random shifts of the signal, and recompute the AUC. 
-
-This gives us a null distribution from which we can judge an AUC as significant or not. 
-
-(In the paper [1], N = 1000)
-
-First confirm what the method looks like for a few cells.
+Then confirm what the method looks like for a few cells.
 ```{r}
 N = 50
 
@@ -172,12 +170,18 @@ for (evt in events_of_interest) {
 
 How many positively and negatively responding cells are there?
 ```{r}
+dt_summ = data.table(category = character(), n = numeric())
+dt_summ = rbind(dt_summ, list('total', length(cells)))
 for (evt in events_of_interest) {
   print(evt)
   cn_pos = paste(evt, 'pos_resp', sep = '_')
   cn_neg = paste(evt, 'neg_resp', sep = '_')
-  print(sprintf("Positively responding cells: %d", sum(dt_roc[[cn_pos]])))
-  print(sprintf("Negatively responding cells: %d", sum(dt_roc[[cn_neg]])))
+  pos_resp = sum(dt_roc[[cn_pos]])
+  neg_resp = sum(dt_roc[[cn_neg]])
+  dt_summ = rbind(dt_summ, list(cn_pos, pos_resp))
+  dt_summ = rbind(dt_summ, list(cn_neg, neg_resp))
+  print(sprintf("Positively responding cells: %d", pos_resp))
+  print(sprintf("Negatively responding cells: %d", neg_resp))
 }
 
 print(sprintf("Out of %d cells", length(cells)))
@@ -188,33 +192,39 @@ print(sprintf("Out of %d cells", length(cells)))
 ```{r fig6, fig.height = 10, fig.width = 5}
 window = 1000
 
-events_of_interest = c("lspout_first", "rspout_first")
-reward = "left"
-
 for (evt in events_of_interest) {
   trials = ds[event == evt, .SD[which.min(frame)], by = `Trial Number`]$`Trial Number`
   
-  dss = ds[frame_offset_event > -window & frame_offset_event < window & `Trial Number` %in% trials, .(mn = mean(dff)), by = .(frame_offset_event, CellID)]
+  dss = ds[frame_offset_event > -window & frame_offset_event < window & `Trial Number` %in% trials, .(`Mean activity` = mean(dff)), by = .(frame_offset_event, CellID)]
   
   #Sort by responsiveness
   dss = merge(dss, dt_roc, by='CellID')
   colname = paste('null_quantile', evt, sep = "_")
+  rn_pos = paste(evt, 'pos_resp', sep = '_')
+  rn_neg = paste(evt, 'neg_resp', sep = '_')
   null_quantile = dss[[colname]]
   dss[,null_order := null_quantile]
-
-  p = ggplot(dss, aes(x=frame_offset_event, y=reorder(CellID, null_order), fill = mn)) + 
-    geom_tile(show.legend = FALSE) + 
-    scale_fill_distiller(palette = "BrBG") + 
-    theme(axis.ticks.y = element_blank(), axis.text.y = element_blank(), axis.title.y = element_blank()) +
-    ggtitle(sprintf("%s (averaged over %d trials; reward is on the %s)", evt, length(trials), reward))
+  n_pos = dt_summ[category == rn_pos, n]
+  n_neg = dt_summ[category == rn_neg, n]
+  total = dt_summ[category == 'total', n]
+  
+  p = ggplot(dss, aes(x=frame_offset_event, y=reorder(CellID, null_order), fill = `Mean activity`)) + 
+    geom_tile(show.legend = TRUE) + 
+    geom_hline(aes(yintercept=n_neg + 0.5), color = "red") +
+    geom_hline(aes(yintercept=total - n_pos - 0.5), color = "blue") +
+    scale_fill_distiller(palette = "Spectral") + 
+    theme(axis.ticks.y = element_blank(), axis.text.y = element_blank(), panel.grid.major = element_blank(), panel.grid.minor = element_blank(), panel.background = element_blank()) +
+    labs(title = sprintf("%s (averaged over %d trials; reward is on the %s)", evt, length(trials), reward), x = "Frame", y = "Cell")
 
   print(p)  
 }
 ```
+Above the blue line are significantly positively responding cells, and below the red line are negatively responding cells.
 
 ### TODO
 
 * Pool data over multiple recordings
+* Correct for data imbalance?
 
 ### References 
 
