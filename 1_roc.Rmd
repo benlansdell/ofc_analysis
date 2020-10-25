@@ -1,28 +1,10 @@
 ---
 title: "ROC analysis"
 output: html_notebook
+params:
+  fn: 'final_060603.Rds'
+  events_of_interest: ['lspout_first', 'rspout_first']
 ---
-
-## ROC analysis for cells
-
-In this notebook:
-* Perform ROC analysis on single recording to compute responsiveness score (RS)
-* Plot traces aligned to events of interest, sorted by RS
-
-```{bash}
-ls /media/core/core_operations/ImageAnalysisScratch/Schwarz/Cameron/ImagingData/
-```
-
-Choose from one of the above files, and choose events to analyze
-```{r}
-fn = 'final_060603.Rds'
-events_of_interest = c("lspout_first", "rspout_first")
-```
-
-And set local working directory (change to your own)
-```{r}
-setwd('/home/blansdel/projects/roc_cell_analysis')
-```
 
 Imports
 ```{r}
@@ -34,9 +16,36 @@ library(ggplot2)
 source('helper.R')
 ```
 
+Set local working directory (change to your own) and path to the data
+```{r}
+setwd('/home/blansdel/projects/roc_cell_analysis')
+path = '/media/core/core_operations/ImageAnalysisScratch/Schwarz/Cameron/ImagingData/'
+list.files(path)
+```
+
+## ROC analysis for cells
+
+In this notebook:
+* Perform ROC analysis on single recording to compute responsiveness score (RS)
+* Plot traces aligned to events of interest, sorted by RS
+
+Here
+```{r}
+print(sprintf("Recording: %s and events of interest:", params$fn))
+print(params$events_of_interest)
+```
+
+Change these parameters in the notebook header above, if desired
+```{r}
+fn = params$fn                                  #The recording file to analyze
+events_of_interest = params$events_of_interest  #Events to study 
+```
+
+Note this notebook can be saved as a html file with the command: `make_report('1_roc.Rmd', params)`
+This will run all cells in the notebook, with the specified parameters, and save the report to `1_roc-[fn]-[events_of_interest].html`.
+
 Load data
 ```{r}
-path = '/media/core/core_operations/ImageAnalysisScratch/Schwarz/Cameron/ImagingData/'
 dt = readRDS(paste(path, fn, sep = ''))
 ds = preprocess_dt(dt, events_of_interest)
 reward = dt[1,Reward]
@@ -221,9 +230,14 @@ for (evt in events_of_interest) {
 ```
 Above the blue line are significantly positively responding cells, and below the red line are negatively responding cells.
 
+### Save ROC curves for this recording
+
+```{r}
+save_table(dt_roc, params)
+```
+
 ### TODO
 
-* Pool data over multiple recordings
 * Correct for data imbalance?
 
 ### References 

@@ -1,9 +1,28 @@
 ---
 title: "EDA"
-output:
-  html_document:
-    df_print: paged
+output: html_notebook
+params:
+  fn: 'final_100207.Rds'
+  events_of_interest: ['lspout_first', 'rspout_first']
 ---
+
+Imports
+```{r}
+library(hash)
+library(data.table)
+library(ggplot2)
+library(plotly)
+library(htmltools)
+
+source('helper.R')
+```
+
+Set local working directory (change to your own) and path to the data
+```{r}
+setwd('/home/blansdel/projects/roc_cell_analysis')
+path = '/media/core/core_operations/ImageAnalysisScratch/Schwarz/Cameron/ImagingData/'
+list.files(path)
+```
 
 ### In this notebook
 
@@ -11,32 +30,25 @@ output:
 * Basic data checks
 * Look at the signals from trial to trial near events of interest
 
-```{bash}
-ls /media/core/core_operations/ImageAnalysisScratch/Schwarz/Cameron/ImagingData/
+Here
+```{r}
+print(sprintf("Recording: %s and events of interest:", params$fn))
+print(params$events_of_interest)
 ```
 
-Choose a file from the above to analyze
+Change these parameters in the notebook header above, if desired
 ```{r}
-fn = 'final_060603.Rds'
+fn = params$fn                                  #The recording file to analyze
+events_of_interest = params$events_of_interest  #Events to study 
 ```
 
-And set local working directory (change to your own)
-```{r}
-setwd('/home/blansdel/projects/roc_cell_analysis')
-```
+Note this notebook can be saved as a html file with the command: `make_report('0_eda.Rmd', params)`
+This will run all cells in the notebook, with the specified parameters, and save the report to `0_eda-[fn]-[events_of_interest].html`.
 
 ### Some basic data checks
 
 Load and view the data
 ```{r}
-library(data.table)
-library(plotly)
-library(ggplot2)
-library(htmltools)
-
-source('helper.R')
-
-path = '/media/core/core_operations/ImageAnalysisScratch/Schwarz/Cameron/ImagingData/'
 dt = readRDS(paste(path, fn, sep = ''))
 dt
 ```
@@ -51,7 +63,7 @@ reward = unique(dt[,Reward])
 ```
 
 ```{r}
-dt[, .(nframes = uniqueN(frame)), by=.(event)]
+dt[CellID == 1, .N, by=event]
 ```
 
 The sampling rate (Hz) is: 
@@ -62,12 +74,7 @@ sr
 
 How long are each of the trials?
 ```{r}
-dt[,.(nframes = uniqueN(`frame`)), by = .(`Trial Number`)]
-```
-
-Are there any missing time stamps/frames per cell?
-```{r}
-dt[, .(nframes = uniqueN(`frame`)),by = .(CellID)]
+dt[CellID == 1, .N, by = `Trial Number`]
 ```
 
 Are there any NAs?
@@ -105,7 +112,7 @@ What does the experiment progression look like for each trial? (WebGL for speed 
 
 We'll analyze activity at the start of these events:
 ```{r}
-events_of_interest = c('lspout_first', 'rspout_first')
+events_of_interest
 ```
 
 The `preprocess_dt` function does the following:
@@ -152,11 +159,13 @@ Heatmap of the mean dff signal for each cell over all trials (regardless of whic
 ```{r fig4, fig.height = 10, fig.width = 5}
 window = 1000
 
-p = ggplot(ds[frame_offset_event > -window & frame_offset_event < window, .(mn = mean(dff)), by = .(frame_offset_event, CellID)],
-           aes(x=frame_offset_event, y=CellID, fill = mn)) +
-  geom_tile(show.legend = FALSE) +
-  scale_fill_distiller(palette = "BrBG") +
-  theme(axis.ticks.y = element_blank(), axis.text.y = element_blank(), axis.title.y = element_blank())
+dss = ds[frame_offset_event > -window & frame_offset_event < window, .(`Mean activity` = mean(dff)), by = .(frame_offset_event, CellID)]
+
+p = ggplot(dss, aes(x=frame_offset_event, y=CellID, fill = `Mean activity`)) + 
+geom_tile(show.legend = TRUE) + 
+scale_fill_distiller(palette = "Spectral") + 
+theme(axis.ticks.y = element_blank(), axis.text.y = element_blank(), panel.grid.major = element_blank(), panel.grid.minor = element_blank(), panel.background = element_blank()) +
+labs(x = "Frame", y = "Cell")
 
 p
 ```
@@ -164,8 +173,13 @@ p
 Narrower heatmap of the mean signal for each cell over all trials (regardless of which event it is)
 ```{r fig5, fig.height = 10, fig.width = 5}
 window = 100
-p = ggplot(ds[frame_offset_event > -window & frame_offset_event < window, .(mn = mean(dff)), by = .(frame_offset_event, CellID)],
-           aes(x=frame_offset_event, y=CellID, fill = mn)) + geom_tile(show.legend = FALSE) + scale_fill_distiller(palette = "BrBG") + theme(axis.ticks.y = element_blank(), axis.text.y = element_blank(), axis.title.y = element_blank())
+dss = ds[frame_offset_event > -window & frame_offset_event < window, .(`Mean activity` = mean(dff)), by = .(frame_offset_event, CellID)]
+
+p = ggplot(dss, aes(x=frame_offset_event, y=CellID, fill = `Mean activity`)) + 
+geom_tile(show.legend = TRUE) + 
+scale_fill_distiller(palette = "Spectral") + 
+theme(axis.ticks.y = element_blank(), axis.text.y = element_blank(), panel.grid.major = element_blank(), panel.grid.minor = element_blank(), panel.background = element_blank()) +
+labs(x = "Frame", y = "Cell")
 p
 ```
 
@@ -178,10 +192,14 @@ window = 1000
 for (evt in events_of_interest) {
   trials = ds[event == evt, .SD[which.min(frame)], by = `Trial Number`]$`Trial Number`; 
   
-  dss = ds[frame_offset_event > -window & frame_offset_event < window & `Trial Number` %in% trials, .(mn = mean(dff)), by = .(frame_offset_event, CellID)]; 
-  
-  p = ggplot(dss, aes(x=frame_offset_event, y=CellID, fill = mn)) + geom_tile(show.legend = FALSE) + scale_fill_distiller(palette = "BrBG") + theme(axis.ticks.y = element_blank(), axis.text.y = element_blank(), axis.title.y = element_blank()) + ggtitle(sprintf("%s (averaged over %d trials; reward is on the %s)", evt, length(trials), reward))
+  dss = ds[frame_offset_event > -window & frame_offset_event < window & `Trial Number` %in% trials, .(`Mean activity` = mean(dff)), by = .(frame_offset_event, CellID)]
 
+    p = ggplot(dss, aes(x=frame_offset_event, y=CellID, fill = `Mean activity`)) + 
+    geom_tile(show.legend = TRUE) + 
+    scale_fill_distiller(palette = "Spectral") + 
+    theme(axis.ticks.y = element_blank(), axis.text.y = element_blank(), panel.grid.major = element_blank(), panel.grid.minor = element_blank(), panel.background = element_blank()) +
+    labs(title = sprintf("%s (averaged over %d trials; reward is on the %s)", evt, length(trials), reward), x = "Frame", y = "Cell")
+    
   print(p)  
 }
 
@@ -193,24 +211,19 @@ window = 200
 
 #plots <- lapply(events_of_interest, function(evt) 
 for (evt in events_of_interest) {
-  trials = ds[event == evt, .SD[which.min(frame)], by = `Trial Number`]$`Trial Number`; 
+  trials = ds[event == evt, .SD[which.min(frame)], by = `Trial Number`]$`Trial Number`
   
-  dss = ds[frame_offset_event > -window & frame_offset_event < window & `Trial Number` %in% trials, .(mn = mean(dff)), by = .(frame_offset_event, CellID)]; 
-  
-  p = ggplot(dss, aes(x=frame_offset_event, y=CellID, fill = mn)) + 
-    geom_tile(show.legend = FALSE) + scale_fill_distiller(palette = "BrBG") + 
-    theme(axis.ticks.y = element_blank(), axis.text.y = element_blank(), axis.title.y = element_blank()) +
-    ggtitle(sprintf("%s (averaged over %d trials; reward is on the %s)", evt, length(trials), reward))
+  dss = ds[frame_offset_event > -window & frame_offset_event < window & `Trial Number` %in% trials, .(`Mean activity` = mean(dff)), by = .(frame_offset_event, CellID)]
 
+    p = ggplot(dss, aes(x=frame_offset_event, y=CellID, fill = `Mean activity`)) + 
+    geom_tile(show.legend = TRUE) + 
+    scale_fill_distiller(palette = "Spectral") + 
+    theme(axis.ticks.y = element_blank(), axis.text.y = element_blank(), panel.grid.major = element_blank(), panel.grid.minor = element_blank(), panel.background = element_blank()) +
+    labs(title = sprintf("%s (averaged over %d trials; reward is on the %s)", evt, length(trials), reward), x = "Frame", y = "Cell")
+    
   print(p)  
 }
 ```
-
-### Cluster traces
-
-For each cell and each trial, cluster dff 
-
-
 
 ### TODO
 
