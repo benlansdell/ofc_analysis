@@ -1,6 +1,8 @@
 ---
 title: "ROC multiple recordings"
-output: html_notebook
+output:
+  html_document:
+    df_print: paged
 ---
 
 ## ROC analysis for all cells
@@ -40,11 +42,6 @@ dt_roc = fread('./results/roc_analysis.csv')
 dt_roc
 ```
 
-An important consideration when comparing across recordings is the reward direction of each session:
-```{r}
-unique(dt_roc[, .(Session, Reward), by = Animal])
-```
-
 To analyize the results, we find cells that are in all recordings of the same animal.
 
 First, get rid of the cells with MatchID == 0 -- these weren't matched between any recordings.
@@ -82,11 +79,11 @@ dt_roc
 Now we can do some stats on this table.
 
 For each animal and event, we can classify each matched cell as:
-* Insignificant in all sessions (none)
-* Significant in all sessions (either all_pos, all_neg)
-* One that changes its significance between sessions (mixed)
+* Non-responding in all sessions (none)
+* Significantly responsive in all sessions (either all_pos, all_neg)
+* A cell that changes its response between sessions (mixed)
 
-Now we compute an extra column that classifies each cell by its positive or negative responsiveness to each event according to the above categories. 
+We compute an extra column that classifies each cell by its positive or negative responsiveness to each event according to the above categories. 
 ```{r}
 classify = function(n_pos_sig, n_neg_sig, n_rec) {
   if (n_pos_sig == n_rec) return('all_pos')
@@ -129,18 +126,23 @@ dt_summary[, .N, by = .(Animal, rspout_first_class)]
 ```
 
 But this doesn't take into account the reward location of the sessions, which is probably an important factor in the cells' responses.
+```{r}
+unique(dt_roc[, .(Session, Reward), by = Animal])
+```
 
-So next we summarize the results for the left and right reward sessions. 
+So next we simply count the number of responsive cells for each session. 
 ```{r}
 unique(dt_roc[, .(Reward, N_lspout_first_p = sum(lspout_first_pos_resp), N_lspout_first_n = sum(lspout_first_neg_resp), N_rspout_first_p = sum(rspout_first_pos_resp), N_rspout_first_n = sum(rspout_first_neg_resp), .N), by = .(Animal, Session)])
 ```
 
-Now plot some traces aligned with each event of interest, for each animal, sorted by the above categories
-
+Plot some traces aligned with each event of interest, for each animal, sorted by the above categories
 ```{r}
-
 make_facet_plot = function(animal = 6, evt = 'lspout_first', window = 1000) {
 
+  #animal = 10
+  #evt = 'lspout_first'
+  #window = 1000
+  
   facet_labeller <- function(variable,value){ return(facet_names[value])}
   quantile_rank = function(rank) {return(0.1 + rank/10)}
     
@@ -160,13 +162,15 @@ make_facet_plot = function(animal = 6, evt = 'lspout_first', window = 1000) {
     dss = ds[frame_offset_event > -window & frame_offset_event < window & `Trial Number` %in% trials,
              .(Session = unique(Session), `Mean activity` = mean(dff)),
              by = .(frame_offset_event, CellID, recording)]
-    facet_names[[unique(dss$Session)]] = paste('Session:', dss$Session, 'Reward:', reward, 'Trials:', length(trials))
+    facet_names[[as.character(unique(dss$Session))]] = paste('Session:', unique(dss$Session), 'Reward:', reward, 'Trials:', length(trials))
     dss = dss %>% mutate(CellID = as.numeric(CellID))
     dss = dss %>% mutate(`Mean activity` = as.numeric(`Mean activity`))
     dss = dss %>% mutate(Session = as.numeric(Session))
     dss = merge(dss, dt_roc, by=c('recording', 'Session', 'CellID'), all = FALSE)
     dt_animal = rbind(dt_animal, dss)
   }
+  
+  facet_names = unlist(facet_names, use.names = TRUE)
   
   #Sort by responsiveness
   colname = paste('null_quantile', evt, sep = "_")
@@ -190,13 +194,15 @@ make_facet_plot = function(animal = 6, evt = 'lspout_first', window = 1000) {
   n_all_neg = sum(dt_animal[(frame_offset_event == 0) & (recording == files[1])][[cn]] == 'all_neg')
   n_mixed = sum(dt_animal[(frame_offset_event == 0) & (recording == files[1])][[cn]] == 'mixed')
   n_none = sum(dt_animal[(frame_offset_event == 0) & (recording == files[1])][[cn]] == 'none')
-  
+
   #Then make a facet plot, with the number of facets being the number of sessions
   p = ggplot(dt_animal, aes(x=frame_offset_event, y=reorder(MatchID, class_order), fill = `Mean activity`)) +
     geom_tile(show.legend = TRUE) +
-    facet_wrap(~Session, labeller = facet_labeller) +
+#    facet_wrap(~Session, labeller = facet_labeller) +
+    facet_wrap(~Session, labeller = labeller(Session = facet_names)) +
     scale_fill_distiller(palette = "Spectral") +
     theme(axis.ticks.y = element_blank(), panel.grid.major = element_blank(), panel.grid.minor = element_blank(), panel.background = element_blank()) + 
+    geom_vline(data = dt_animal, aes(xintercept=0), color = "black") + 
     geom_hline(data = dt_animal, aes(yintercept=n_all_neg+n_none+n_mixed+0.5), color = "blue") + 
     geom_hline(data = dt_animal, aes(yintercept=n_all_neg+n_none+0.5), color = "orange") + 
     geom_hline(data = dt_animal, aes(yintercept=n_all_neg+0.5), color = "red") + 
@@ -206,26 +212,27 @@ make_facet_plot = function(animal = 6, evt = 'lspout_first', window = 1000) {
 }
 ```
 
-```{r fig2, fig.height = 8, fig.width = 6}
-make_facet_plot()
+```{r fig2, fig.height = 10, fig.width = 7}
+make_facet_plot(animal = 6, evt = 'lspout_first')
+```
+Cells below the red line have suppressed activity in all sessions. Those above the blue line have excited activity in all sessions. Those in between the red and orange do not respond in any condition. And those in between the orange and blue have mixed repsonses.
+
+```{r fig3, fig.height = 10, fig.width = 7}
+make_facet_plot(animal = 6, evt = 'rspout_first')
 ```
 
-```{r fig3, fig.height = 8, fig.width = 6}
-make_facet_plot(evt = 'rspout_first')
+```{r fig4, fig.height = 10, fig.width = 7}
+make_facet_plot(animal = 8, evt = 'lspout_first')
 ```
 
-```{r fig4, fig.height = 8, fig.width = 6}
-make_facet_plot(animal = 8)
-```
-
-```{r fig.height = 8, fig.width = 6}
+```{r fig.height = 10, fig.width = 7}
 make_facet_plot(animal = 8, evt = 'rspout_first')
 ```
 
-```{r fig.height = 8, fig.width = 6}
+```{r fig.height = 10, fig.width = 10}
 make_facet_plot(animal = 10, evt = 'lspout_first')
 ```
 
-```{r fig.height = 8, fig.width = 6}
+```{r fig.height = 10, fig.width = 10}
 make_facet_plot(animal = 10, evt = 'rspout_first')
 ```

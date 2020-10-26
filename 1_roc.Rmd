@@ -29,6 +29,8 @@ In this notebook:
 * Perform ROC analysis on single recording to compute responsiveness score (RS)
 * Plot traces aligned to events of interest, sorted by RS
 
+### Load the data
+
 Here
 ```{r}
 print(sprintf("Recording: %s and events of interest:", params$fn))
@@ -71,9 +73,11 @@ ds[, dff_zs := (dff - mean(dff))/sd(dff), by = `CellID`]
 ds
 ```
 
-### ROC curves measuring responsiveness to events of interest
+## ROC curves measuring responsiveness to events of interest
 
-Compute the ROC curves. The signal is treated as a binary classifier for the experimental state of interest. That is, if it is above a given amount then it counts as 1, otherwise 0. We can use this to generate an ROC curve, which indicates how well that cell classifies times as the event of interest. The ROC AUC is used as a measure of cell responsiveness. 
+### What is the ROC analysis?
+
+In this analysis the signal is treated as a binary classifier for the experimental state of interest. That is, if it is above a given amount then it counts as 1, otherwise 0. We can use this to generate an ROC curve, which indicates how well that cell classifies times as the event of interest. The ROC AUC is used as a measure of cell responsiveness. 
 
 Make a dictionary of ROC curves for each cellID
 ```{r}
@@ -81,6 +85,48 @@ roc_curves = hash()
 per_cell_ds = split(ds, f = ds$CellID)
 cells = unique(ds$CellID)
 ```
+
+```{r}
+idx = 127
+p = plot_ly(data = ds[CellID == idx], x = ~frame, y = ~dff, type = "scatter", mode = "lines", name = 'dff') %>%
+    layout(title=sprintf("Cell #%s", idx)) %>% toWebGL()
+p = p %>% add_trace(data = ds[CellID == idx], x = ~frame, y = ~lspout_first, 
+                       type = 'scatter', mode = 'line+markers', name = 'lspout_first')
+p
+```
+
+Take an example cell and plot its histograms
+```{r}
+plot_single_roc = function(idx = 126, evt = 'lspout_first') {
+  ttl = paste('Cell:', idx, 'Event:', evt)
+  p <- per_cell_ds[[idx]] %>%
+    ggplot( aes(x=dff_zs, fill=as.character(lspout_first))) +
+      geom_histogram( color="#e9ecef", alpha=0.6, position = 'identity') +
+      scale_fill_manual(values=c("#69b3a2", "#404080")) +
+      labs(fill="", title = ttl)
+  print(p)
+  
+  dss = per_cell_ds[[idx]]
+  p = performance(prediction(dss$dff_zs, dss[,..evt]), "tpr", "fpr") 
+  q = performance(prediction(dss$dff_zs, dss[,..evt]), "auc") 
+  plot(p)
+  title(ttl)
+}
+```
+
+```{r}
+idx = 127
+evt = 'lspout_first'
+plot_single_roc(idx, evt)
+```
+
+```{r}
+idx = 126
+evt = 'lspout_first'
+plot_single_roc(idx, evt)
+```
+
+### Compute the ROC AUC for all cells
 
 ```{r}
 for (evt in events_of_interest) {
@@ -122,10 +168,15 @@ Then confirm what the method looks like for a few cells.
 ```{r}
 N = 50
 
-n_cells = 1
-cell <- sample(unique(ds$CellID), n_cells, replace=F)
+#Randomly select a cell
+#n_cells = 1
+#cell <- sample(unique(ds$CellID), n_cells, replace=F)
 
-dss = ds[CellID == cell]
+#Or use the cell from above
+cell = 127
+
+#dss = ds[CellID == cell]
+dss = per_cell_ds[[idx]]
 
 for (evt in events_of_interest) {
   aucs = c()
@@ -203,9 +254,9 @@ window = 1000
 
 for (evt in events_of_interest) {
   trials = ds[event == evt, .SD[which.min(frame)], by = `Trial Number`]$`Trial Number`
-  
+
   dss = ds[frame_offset_event > -window & frame_offset_event < window & `Trial Number` %in% trials, .(`Mean activity` = mean(dff)), by = .(frame_offset_event, CellID)]
-  
+
   #Sort by responsiveness
   dss = merge(dss, dt_roc, by='CellID')
   colname = paste('null_quantile', evt, sep = "_")
@@ -216,16 +267,16 @@ for (evt in events_of_interest) {
   n_pos = dt_summ[category == rn_pos, n]
   n_neg = dt_summ[category == rn_neg, n]
   total = dt_summ[category == 'total', n]
-  
-  p = ggplot(dss, aes(x=frame_offset_event, y=reorder(CellID, null_order), fill = `Mean activity`)) + 
-    geom_tile(show.legend = TRUE) + 
+
+  p = ggplot(dss, aes(x=frame_offset_event, y=reorder(CellID, null_order), fill = `Mean activity`)) +
+    geom_tile(show.legend = TRUE) +
     geom_hline(aes(yintercept=n_neg + 0.5), color = "red") +
     geom_hline(aes(yintercept=total - n_pos - 0.5), color = "blue") +
-    scale_fill_distiller(palette = "Spectral") + 
+    scale_fill_distiller(palette = "Spectral") +
     theme(axis.ticks.y = element_blank(), axis.text.y = element_blank(), panel.grid.major = element_blank(), panel.grid.minor = element_blank(), panel.background = element_blank()) +
     labs(title = sprintf("%s (averaged over %d trials; reward is on the %s)", evt, length(trials), reward), x = "Frame", y = "Cell")
 
-  print(p)  
+  print(p)
 }
 ```
 Above the blue line are significantly positively responding cells, and below the red line are negatively responding cells.
