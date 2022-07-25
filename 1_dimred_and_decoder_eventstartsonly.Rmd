@@ -1,0 +1,317 @@
+---
+title: "Ensembles and decoding"
+output:
+  html_document:
+    df_print: paged
+    toc: true
+    theme: united
+params:
+  fn: final_100207.Rds
+  path: /media/core/core_operations/ImageAnalysisScratch/Schwarz/Cameron/ImagingData/
+  event_onset_window_size: 2
+  events_to_decode: ["In Start", "middle_left", "In Left decision", "In Left", "lspout_first", "lspout_exit", "In Middle", "middle_right", "In Right decision", "In Right", "rspout_first", "rspout_exit", "In Right Exit", "In Reward"]
+---
+
+```{r setup, include=FALSE} 
+knitr::opts_chunk$set(warning = FALSE, message = FALSE, echo = FALSE) 
+```
+
+```{r}
+library(data.table)
+library(ggplot2)
+library(plotly)
+library(htmltools)
+library(reshape2)
+library(gridExtra)
+library(nnet)
+library(cvms)
+
+library(foreach)
+library(parallel)
+library(doParallel)
+
+source('helper.R')
+
+fps <- 20
+```
+
+## In this notebook
+
+For an individual recording, perform:
+
+* Dimensionality reduction -- PCA
+
+* Network state analysis (frame-frame similarities over trials)
+
+* Linear decoding of events
+
+## Basic stats
+
+Load data table
+
+```{r}
+##Set path to the data
+
+## Final day of training
+#path = '/media/core/core_operations/ImageAnalysisScratch/Schwarz/Cameron/ImagingData/'
+#fn = 'final_100207.Rds'
+
+## Final day of training
+#path = '/media/core/core_operations/ImageAnalysisScratch/Schwarz/Cameron/ImagingData2/'
+#fn = 'final_010718.Rds'
+
+path = params$path
+fn = params$fn
+event_onset_window_size <- params$event_onset_window_size
+events_to_decode <- params$events_to_decode
+
+dt = readRDS(paste0(path, fn))
+dt
+```
+
+Number of trials
+```{r}
+unique(dt$`Trial Number`)
+```
+
+Number of cells
+```{r}
+uniqueN(dt$CellID)
+```
+
+Number of frames
+```{r}
+uniqueN(dt$frame)
+```
+
+Any missing frames?
+```{r}
+max(dt$frame) - min(dt$frame) + 1 - uniqueN(dt$frame)
+```
+
+Reward for this recording is on the:
+```{r}
+unique(dt$Reward)
+```
+
+## EDA 
+
+### Dimensionality reduction
+
+```{r}
+dt_wide <- dt[,.(frame, CellID, dff, event, `Trial Number`)]
+dt_wide <- data.table(dcast(dt_wide, frame + event + `Trial Number` ~ paste0("cell_", CellID), value.var="dff"))
+cell_cols <- colnames(dt_wide)[4:length(colnames(dt_wide))]
+index_cols <- colnames(dt_wide)[1:3]
+zscored <- scale(dt_wide[,..cell_cols])
+dt_zscored <- cbind(dt_wide[, ..index_cols], zscored)
+```
+
+Compute PCA of the data matrix
+
+```{r}
+prComp<-prcomp(zscored)
+PoV <- prComp$sdev^2/sum(prComp$sdev^2)
+plot(cumsum(PoV), xlab="# PCs", ylab="cumulative variance explained")
+```
+
+Plot projection onto first 2 PCs
+
+```{r}
+dt_pca = cbind(dt_wide[, ..index_cols], as.data.table(prComp$x))
+ggplot(dt_pca, aes(x = PC1, y = PC2, color = event)) + geom_point(size = .5)
+```
+
+The cell weights of the first two PCs. Check if only a few cells are highly weighted (and thus responsible for the observed dynamics)
+
+```{r fig.width=15, fig.height=6}
+pca_weights <- as.data.table(prComp$rotation[,1:2])
+pca_weights[, cell_id := rownames(prComp$rotation)]
+pca_weights <- melt(pca_weights, measure.vars = c("PC1", "PC2"), id.vars = "cell_id")
+
+ggplot(pca_weights, aes(y = value, x = cell_id, color = variable)) + geom_point() + xlab("Cell ID") + ylab("PC") + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+```
+
+First 3 PCs (with plotly)
+
+```{r}
+fig <- plot_ly(dt_pca, x = ~PC1, y = ~PC2, z = ~PC3, color = ~event, size = 1)
+fig <- fig %>% add_markers()
+fig <- fig %>% layout(scene = list(xaxis = list(title = 'PC1'),
+                     yaxis = list(title = 'PC2'),
+                     zaxis = list(title = 'PC3'))) %>% toWebGL()
+fig
+```
+
+Variance of first three PCs, by each event type. See which events exhibit most variability/longest trajectories
+
+```{r}
+dt_pca_vars <- dt_pca[, .(PC1_var = var(PC1), PC2_var = var(PC2), PC3_var = var(PC3)), by = .(event)]
+dt_pca_vars <- melt(dt_pca_vars, id.vars = 'event', measure.vars = c('PC1_var', 'PC2_var', 'PC3_var'))
+ggplot(dt_pca_vars) + geom_tile(aes(x = event, y = variable, fill = value)) + xlab("Event") + ylab("Variance") + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+```
+
+PCA embeddings for individual trials
+
+```{r}
+l <- htmltools::tagList()
+for (tn in 1:12) {
+  dt_pca_tn <- dt_pca[`Trial Number` == tn]
+  fig <- plot_ly(dt_pca_tn, x = ~PC1, y = ~PC2, z = ~PC3, color = ~event, size = 1, mode = "lines+markers", 
+    line=list(width=~1))
+  fig <- fig %>% add_markers() %>% layout(title = paste('Trial', tn))
+  fig <- fig %>% layout(scene = list(xaxis = list(title = 'PC1'),
+                       yaxis = list(title = 'PC2'),
+                       zaxis = list(title = 'PC3'))) #%>% toWebGL()
+  l[[tn]] <- fig
+}
+
+l
+```
+
+### Frame-frame similarities between and within trials
+
+Look for similarities between activity at different parts of the trials. For this, compute correlation in signal for pairs of frames. When summarizing average similarity of activity during one event to another event, results may be affected by the proportion of time spent in each of the event types. Longer events may tend to show more diverse activity patterns, lowering mean similarity, just because they occur over longer times. To control for this, this analysis focuses on a fixed time window at the onset of each event. Here we focus on the first 2 seconds of an event onset.
+
+```{r}
+#For each trial, find the first time each event occurs
+event_onset_times <- dt[, .(start_time = min(frame)), by = .(`Trial Number`, event)]
+dt_ <- merge(dt, event_onset_times, by = c("Trial Number", "event"))
+dt_event_onset = dt_[(frame - start_time > 0) & (frame - start_time < (fps*event_onset_window_size)), ]
+
+dt_wide <- dt_event_onset[,.(frame, CellID, dff, event, `Trial Number`)]
+dt_wide <- data.table(dcast(dt_wide, frame + event + `Trial Number` ~ paste0("cell_", CellID), value.var="dff"))
+cell_cols <- colnames(dt_wide)[4:length(colnames(dt_wide))]
+index_cols <- colnames(dt_wide)[1:3]
+zscored <- scale(dt_wide[,..cell_cols])
+dt_zscored <- cbind(dt_wide[, ..index_cols], zscored)
+```
+
+To get an overall picture of the structure in the experiment, compute frame-frame activity similarity for whole recording.
+
+```{r}
+every_n_frames <- 1
+
+dt_zscore_subsample = zscored[seq(1, nrow(zscored), every_n_frames), ]
+idx_subsample <- dt_wide[seq(1, nrow(zscored), every_n_frames), ..index_cols]
+idx_subsample$row = 1:nrow(idx_subsample)
+
+zscore_corr_mat <- as.data.table(cor(t(dt_zscore_subsample)))
+setnames(zscore_corr_mat, colnames(zscore_corr_mat), sub('.', '', colnames(zscore_corr_mat)))
+cns <- colnames(zscore_corr_mat)
+zscore_corr_mat <- cbind(data.table(row = 1:length(zscore_corr_mat)), zscore_corr_mat)
+zscore_corr_mat = data.table(melt(zscore_corr_mat, measure.vars = cns, id.vars = c("row"), variable.name = "col"))
+zscore_corr_mat[, col := as.integer(col)] 
+zscore_corr_mat <- merge(zscore_corr_mat, idx_subsample, by = "row")[, .(row, col, value, frame, event, `Trial Number`)]
+setnames(zscore_corr_mat, c("frame", "event", "Trial Number"), c("frame_row", "event_row", "trial_num_row"))
+zscore_corr_mat <- merge(zscore_corr_mat, idx_subsample, by.x = "col", by.y = "row")[, .(col, row, value, frame_row, event_row, trial_num_row, frame, event, `Trial Number`)]
+setnames(zscore_corr_mat, c("frame", "event", "Trial Number"), c("frame_col", "event_col", "trial_num_col"))
+```
+
+Plot correlations for all trials
+
+```{r}
+p1 <- ggplot(zscore_corr_mat) + geom_raster(aes(x = row, y = col, fill = value))
+p1
+```
+
+Average frame-frame correlations over all trials by event type
+
+```{r}
+mean_corrs = zscore_corr_mat[, .(mean_corr = mean(value)), by = .(event_row, event_col)]
+p1 <- ggplot(mean_corrs) + geom_raster(aes(x = event_row, y = event_col, fill = mean_corr)) + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+p1
+```
+
+Hierarchical clustering of this correlation matrix. Neighbors here reflect trial structure.
+
+```{r}
+mean_corrs_wide <- dcast(mean_corrs, event_row ~ event_col, value.var = "mean_corr")
+distanceMatrix <- as.dist(as.matrix(1-mean_corrs_wide[,2:ncol(mean_corrs_wide)]))
+clusters <- hclust(distanceMatrix)
+plot(clusters)
+```
+
+## Building a linear decoder
+
+Use leave-one-trial-out CV to fit a logistic regression model to the z-scored DFF signal, predicting the event the animal is currently in.
+
+```{r}
+max_iter = 1000
+weight_decay = 0.1
+trials = unique(dt_zscored$`Trial Number`)
+```
+
+```{r}
+n_workers = length(trials)
+cl <- makeCluster(n_workers)
+registerDoParallel(cl)
+
+dt_zscored_eoi <- dt_zscored[event %in% events_to_decode]
+
+evals = foreach(trial = trials, .packages = c("data.table", "nnet", "cvms")) %dopar% {
+
+  #trial = 1
+  print(paste("Training fold", trial))
+  train_data = dt_zscored_eoi[`Trial Number` != trial]
+  test_data = dt_zscored_eoi[`Trial Number` == trial]
+  test_data[ ,c("frame","Trial Number") := NULL]
+  train_data[ ,c("frame","Trial Number") := NULL]
+  test_data[ , event := as.factor(event)]
+  train_data[ , event := as.factor(event)]
+  
+  model_multi = multinom(event ~ ., train_data, trace = FALSE, maxit=max_iter, MaxNWts=84581, decay = weight_decay)
+
+  model_preds <- predict(model_multi, newdata = test_data)
+  true_event <- test_data$event
+
+  fold_results <- data.table(pred = as.character(model_preds), gt = as.character(true_event))
+  eval <- evaluate(fold_results,
+                   target_col = "gt",
+                   prediction_cols = "pred", type = "multinomial")
+  eval$`Trial Number` <- trial
+  eval$`baseline_accuracy` <- compute_baseline_accuracy(test_data)
+  return(eval)
+}
+evals = rbindlist(evals)
+stopCluster(cl)
+
+#test_data
+#compute_baseline_accuracy(test_data)
+```
+
+How many trial have above-chance decoding performance?
+
+```{r}
+nrow(evals[`Overall Accuracy` > baseline_accuracy])
+```
+
+Plot confusion matrices
+
+```{r}
+for (idx in 1:12) {
+  print(plot_cm(dt_zscored, evals, idx))
+}
+```
+
+
+# References
+
+* Kingsbury et al 2019. Correlated Neural Activity and Encoding of Behavior across Brains of Socially Interacting Animals. 
+
+This study uses PCA-based population responses to summarize ensemble activity. 
+
+* Kingsbury et al 2020. Cortical Representations of conspecific sex shape social behavior. 
+
+This study also uses PCA-based population responses to summarize ensemble activity. It also builds an LDA-based decoder to predict behaviors based on population activity. 
+
+### Appendix -- Plots of individual trials
+
+Frame-frame similarities for each trial
+
+```{r}
+for (trial in unique(zscore_corr_mat$trial_num_col)) {
+  p1 <- ggplot(zscore_corr_mat[trial_num_row == trial & trial_num_col == trial]) + geom_raster(aes(x = row, y = col, fill = value)) + ggtitle(paste('Trial:', trial))
+  print(p1)
+}
+```

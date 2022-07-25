@@ -19,7 +19,7 @@ source('helper.R')
 
 Set local working directory (change to your own) and path to the data
 ```{r}
-setwd('/home/blansdel/projects/roc_cell_analysis')
+setwd('/home/blansdel/projects/schwarz/decoder/')
 path = '/media/core/core_operations/ImageAnalysisScratch/Schwarz/Cameron/ImagingData/'
 list.files(path)
 ```
@@ -60,11 +60,18 @@ dt[, .N, by=.(Session, Animal, Reward)]
 
 ```{r}
 reward = unique(dt[,Reward])
+reward
 ```
 
 ```{r}
 dt[CellID == 1, .N, by=event]
 ```
+
+What are the trial progressions?
+```{r}
+dt[CellID == 1, .N, by=.(event, `Trial Number`)]
+```
+
 
 The sampling rate (Hz) is: 
 ```{r}
