@@ -23,15 +23,24 @@ def compute_stats(df, condition = 'Control', sessions = [2, 6, 7, 9]):
 
     return cell_sums, cell_stats, cell_sums_list, animals
 
-def mutual_info(x, y):
+#Simple mutual information calculation for discrete variables
+def mutual_info(x, y, n_cat = 2, labels = None):
     mi = 0
     N = len(x)
     if N == 0: return 0
     assert len(x) == len(y)
-    x = x.astype(int)
-    y = y.astype(int)
-    for i in range(2):
-        for j in range(2):
+    
+    if labels is None:
+        iterator1 = range(n_cat)
+        iterator2 = range(n_cat)
+        x = x.astype(int)
+        y = y.astype(int)
+    else:
+        iterator1 = labels 
+        iterator2 = labels
+
+    for i in iterator1:
+        for j in iterator2:
             pij = sum((x == i) & (y == j))/N
             pi = sum(x == i)/N
             pj = sum(y == j)/N
