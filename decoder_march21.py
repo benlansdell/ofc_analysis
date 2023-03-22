@@ -43,14 +43,6 @@ reward_statuses = pd.unique(df['RewardStatus'])
 # test_session = 6
 # test_idx = 1
 
-train_sessions = ['2', '6']
-
-test_session = '7'
-test_idx = 2
-
-# test_session = '9'
-# test_idx = 3
-
 label_key = {'reward_spout_events': 1, 'unreward_spout_events': 0}
 
 pca = PCA(n_components = 20)
@@ -77,7 +69,7 @@ time_pairs = [(1, 20), (101, 140), (161,200), (201,240)]
 n_folds = 5
 
 #%%%
-def run_analysis(t_min, t_max, classifier, param_grid):
+def run_analysis(t_min, t_max, classifier, param_grid, train_sessions, test_session, test_idx, each_trial = False):
 
     results = pd.DataFrame()
 
@@ -147,23 +139,38 @@ def run_analysis(t_min, t_max, classifier, param_grid):
             prop_reward_test = sum(y_test)/len(y_test)
 
             #Apply to each trial
-            by_trial_test_preds = {}
-            by_trial_test = {}
-            for grp in groups_test.unique():
-                y_pred_test_trial = search.best_estimator_.predict(X_test[groups_test == grp])
-                y_test_trial = y_test[groups_test == grp]
-                prop_reward_pred_test_trial = sum(y_pred_test_trial)/len(y_pred_test_trial)            
-                by_trial_test_preds[grp] = prop_reward_pred_test_trial
-                by_trial_test[grp] = sum(y_test_trial)/len(y_test_trial)
+            if each_trial:
+                new_rows = {'treatment': treatment,
+                        'animal': animal,
+                        'val_accuracy': val_accuracy,
+                        'test_accuracy': test_accuracy,
+                        'prop_reward_pred_val': prop_reward_pred,
+                        'prop_reward_pred_test': prop_reward_pred_test,
+                        'prop_reward': prop_reward,
+                        'prop_reward_test': prop_reward_test}
+                by_trial_test_preds = []
+                by_trial_test = []
+                g_test = groups_test.unique()
+                for grp in g_test:
+                    y_pred_test_trial = search.best_estimator_.predict(X_test[groups_test == grp])
+                    y_test_trial = y_test[groups_test == grp]
+                    prop_reward_pred_test_trial = sum(y_pred_test_trial)/len(y_pred_test_trial)            
+                    by_trial_test_preds.append(prop_reward_pred_test_trial)
+                    by_trial_test.append(sum(y_test_trial)/len(y_test_trial))
+                new_rows['Session_trial'] = g_test
+                new_rows['Reward'] = by_trial_test 
+                new_rows['Prop_pred_reward_trial'] = by_trial_test_preds
+            else:
+                new_rows = {'treatment': [treatment],
+                        'animal': [animal],
+                        'val_accuracy': [val_accuracy],
+                        'test_accuracy': [test_accuracy],
+                        'prop_reward_pred_val': [prop_reward_pred],
+                        'prop_reward_pred_test': [prop_reward_pred_test],
+                        'prop_reward': [prop_reward],
+                        'prop_reward_test': [prop_reward_test]}
 
-            results = results.append(pd.DataFrame({'treatment': [treatment],
-                                                'animal': [animal],
-                                                'val_accuracy': [val_accuracy],
-                                                'test_accuracy': [test_accuracy],
-                                                'prop_reward_pred_val': [prop_reward_pred],
-                                                'prop_reward_pred_test': [prop_reward_pred_test],
-                                                'prop_reward': [prop_reward],
-                                                'prop_reward_test': [prop_reward_test]}))
+            results = results.append(pd.DataFrame(new_rows))
 
     return results
 
@@ -181,6 +188,10 @@ time_pairs = [(1, 20), (101, 140), (161,200), (201,240)]
 classifiers = [lr_classifier, lda_classifier, rf_classifier]
 grids = [param_grid, param_grid, param_grid_rf]
 
+time_pairs = [(201,240)]
+classifiers = [lda_classifier]
+grids = [param_grid]
+
 #Test each
 # classifiers = [lda_classifier]
 # grids = [param_grid]
@@ -188,9 +199,54 @@ grids = [param_grid, param_grid, param_grid_rf]
 # classifiers = [rf_classifier]
 # grids = [param_grid_rf]
 
+train_sessions = ['2', '6']
+
+test_session = '7'
+test_idx = 2
+
+# test_session = '9'
+# test_idx = 3
+
 results = {}
 for cls, grid in zip(classifiers, grids):
     print("Using", cls)
     for tp in time_pairs:
         print("Decoding", tp)
-        results[(repr(cls), tp)] = run_analysis(*tp, cls, grid)
+        results[(repr(cls), tp)] = run_analysis(*tp, cls, grid, train_sessions, test_session, test_idx, each_trial = True)
+
+#Take average val accuracies
+
+ave_results = {k:v.val_accuracy.mean() for k,v in results.items()}
+
+#Looks like best performance at 201-240 -- as we would expect.
+
+#Run for Day 9:
+test_session = '9'
+test_idx = 3
+
+time_pairs = [(201,240)]
+classifiers = [lda_classifier]
+grids = [param_grid]
+
+day9results = {}
+for cls, grid in zip(classifiers, grids):
+    print("Using", cls)
+    for tp in time_pairs:
+        print("Decoding", tp)
+        day9results[(repr(cls), tp)] = run_analysis(*tp, cls, grid, train_sessions, test_session, test_idx, each_trial = True)
+
+#Take average val accuracies
+ave_resultsday9 = {k:v.val_accuracy.mean() for k,v in day9results.items()}
+
+#Split predictions by trial
+results_d9 = day9results[("Pipeline(steps=[('scaler', StandardScaler()), ('pca', PCA(n_components=20)),\n                ('lda', LinearDiscriminantAnalysis())])", (201, 240))]
+results_d7 = results[("Pipeline(steps=[('scaler', StandardScaler()), ('pca', PCA(n_components=20)),\n                ('lda', LinearDiscriminantAnalysis())])", (201, 240))]
+
+fn_out_d9 = './decoder_day9_results.csv'
+fn_out_d7 = './decoder_day7_results.csv'
+fn_out_ave_d7_results = './decoder_day7_results_average_over_folds.csv'
+
+results_d9.to_csv(fn_out_d9)
+results_d7.to_csv(fn_out_d7)
+
+ave_results.to_csv(fn_out_ave_d7_results)
