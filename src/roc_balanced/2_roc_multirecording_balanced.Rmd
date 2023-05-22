@@ -1,0 +1,86 @@
+---
+title: "ROC multiple recordings, balanced"
+output: html_notebook
+---
+
+## ROC analysis for cells across recordings
+
+In this notebook:
+* Perform ROC analysis on multiple recordings to compute responsiveness score (RS)
+
+Imports
+```{r}
+library(hash)
+library(data.table)
+library(ggplot2)
+library(plotly)
+library(htmltools)
+
+source('helper.R')
+```
+
+Set local working directory (change to your own) and path to the data
+```{r}
+setwd('/home/blansdel/projects/schwarz/roc_cell_analysis')
+path = '/media/core/core_operations/ImageAnalysisScratch/Schwarz/Cameron/FOR_ROC/'
+```
+
+Set parameters for the analysis:
+```{r}
+events_of_interest = c('lspout_first', 'rspout_first')  #Events to study 
+N = 100                                                 #Number of null ROC curves to generate
+alpha = 0.05                                            #Alpha value to determine significance
+```
+
+```{r}
+recordings = list.files(path)
+recordings
+```
+
+### Perform analysis
+
+Now we run the ROC analysis on all files and combine them into one results table.
+This will take ~5-10 minutes per recording.
+```{r}
+dt_roc_balanced = compute_all_rocs_balanced(path, recordings, events_of_interest, N, alpha)
+```
+
+```{r}
+dt_roc = compute_all_rocs_balanced(path, recordings, events_of_interest, N, alpha, balanced = FALSE)
+```
+
+```{r}
+get.
+```
+
+Save the table
+```{r}
+fwrite(dt_roc,'./results/roc_analysis.csv')
+```
+
+Save the balanced table
+```{r}
+fwrite(dt_roc_balanced,'./results/roc_analysis_balanced.csv')
+```
+
+Merge the two tables and compare analyses
+```{r}
+dt_roc_all <- merge(dt_roc, dt_roc_balanced, by = c('recording', 'Animal', 'Session', 'CellID'))
+dt_roc_all
+```
+
+```{r}
+p1 <- ggplot(dt_roc_all, mapping = aes(x = null_quantile_lspout_first.x, y = null_quantile_lspout_first.y)) + geom_point()
+p1
+```
+
+Confusion matrix
+```{r}
+library(caret)
+confusionMatrix(as.factor(dt_roc_all$lspout_first_pos_resp.x), as.factor(dt_roc_all$lspout_first_pos_resp.y))
+```
+
+
+```{r}
+confusionMatrix(as.factor(dt_roc_all$rspout_first_pos_resp.x), as.factor(dt_roc_all$rspout_first_pos_resp.y))
+```
