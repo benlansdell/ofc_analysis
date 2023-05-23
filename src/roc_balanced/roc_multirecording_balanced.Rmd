@@ -7,6 +7,11 @@ output: html_notebook
 
 In this notebook:
 * Perform ROC analysis on multiple recordings to compute responsiveness score (RS)
+* Compute same analysis with a balanced dataset -- same number of rewarded and unrewarded trials
+
+Sessions that are all rewarded or all unrewarded are discarded. 
+
+The idea is to see if behavior is biased the outcome of the ROC analysis.
 
 Imports
 ```{r}
@@ -15,6 +20,7 @@ library(data.table)
 library(ggplot2)
 library(plotly)
 library(htmltools)
+library(caret)
 
 source('helper.R')
 ```
@@ -50,7 +56,7 @@ dt_roc = compute_all_rocs_balanced(path, recordings, events_of_interest, N, alph
 ```
 
 ```{r}
-get.
+dir.create('results')
 ```
 
 Save the table
@@ -74,9 +80,13 @@ p1 <- ggplot(dt_roc_all, mapping = aes(x = null_quantile_lspout_first.x, y = nul
 p1
 ```
 
+```{r}
+p2 <- ggplot(dt_roc_all, mapping = aes(x = null_quantile_rspout_first.x, y = null_quantile_rspout_first.y)) + geom_point()
+p2
+```
+
 Confusion matrix
 ```{r}
-library(caret)
 confusionMatrix(as.factor(dt_roc_all$lspout_first_pos_resp.x), as.factor(dt_roc_all$lspout_first_pos_resp.y))
 ```
 
@@ -84,3 +94,5 @@ confusionMatrix(as.factor(dt_roc_all$lspout_first_pos_resp.x), as.factor(dt_roc_
 ```{r}
 confusionMatrix(as.factor(dt_roc_all$rspout_first_pos_resp.x), as.factor(dt_roc_all$rspout_first_pos_resp.y))
 ```
+
+Approximately 90% overlap between ROC calls in balanced vs unbalanced datasets. This is pretty good overlap, thus behavior is unlikely to strongly be biased ROC analysis.
