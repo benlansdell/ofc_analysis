@@ -1,5 +1,6 @@
 import pandas as pd 
 import pickle 
+import os
 
 from sklearn.decomposition import PCA
 from sklearn.pipeline import Pipeline
@@ -9,6 +10,7 @@ from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
 from src.lib import run_decoder
 
 fn_in = './data/processed/full2.csv'
+out_dir = './data/output/'
 
 df = pd.read_csv(fn_in, dtype = {'Animal': str, 
                                  'UnSpout_pos':str,
@@ -37,13 +39,18 @@ test_pairs = (0, 500)
 classifiers = [lda_classifier]
 grids = [param_grid]
 
+os.makedirs(out_dir, exist_ok=True)
+
 def run_day(train_sessions, test_session):
 
-    #find index of test session from list sessions
     test_idx = sessions.index(test_session)
     train_indices = [sessions.index(s) for s in train_sessions]
 
-    _, dayresults, results = run_decoder(time_pairs, 
+    _, dayresults, results = run_decoder(df, 
+                                         conditions, 
+                                         sessions, 
+                                         label_key, 
+                                         time_pairs, 
                                          test_pairs, 
                                          classifiers, 
                                          grids, 
@@ -52,10 +59,10 @@ def run_day(train_sessions, test_session):
                                          test_idx, 
                                          train_indices=train_indices)
 
-    fn_out = f'./data/output/decoder_day{test_session}_results.csv'
+    fn_out = os.path.join(out_dir, f'decoder_day{test_session}_results.csv')
     results[0].to_csv(fn_out)
 
-    with open(f'./data/output/day{test_session}results.pkl', 'wb') as f:
+    with open(os.path.join(out_dir, f'day{test_session}results.pkl'), 'wb') as f:
         pickle.dump(dayresults, f)
 
 run_day(['2', '6'], '7')
