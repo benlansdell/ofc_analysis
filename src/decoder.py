@@ -41,7 +41,7 @@ grids = [param_grid]
 
 os.makedirs(out_dir, exist_ok=True)
 
-def run_day(train_sessions, test_session, test_pairs = (0, 500), note = ''):
+def run_day(train_sessions, test_session, time_pairs = (201, 240), test_pairs = (0, 500), note = ''):
 
     test_idx = sessions.index(test_session)
     train_indices = [sessions.index(s) for s in train_sessions]
