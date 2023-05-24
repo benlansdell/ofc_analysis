@@ -41,7 +41,7 @@ grids = [param_grid]
 
 os.makedirs(out_dir, exist_ok=True)
 
-def run_day(train_sessions, test_session):
+def run_day(train_sessions, test_session, test_pairs = (0, 500), note = ''):
 
     test_idx = sessions.index(test_session)
     train_indices = [sessions.index(s) for s in train_sessions]
@@ -59,12 +59,15 @@ def run_day(train_sessions, test_session):
                                          test_idx, 
                                          train_indices=train_indices)
 
-    fn_out = os.path.join(out_dir, f'decoder_day{test_session}_results.csv')
+    fn_out = os.path.join(out_dir, f'decoder_day{test_session}_results{note}.csv')
     results[0].to_csv(fn_out)
 
-    with open(os.path.join(out_dir, f'day{test_session}results.pkl'), 'wb') as f:
+    with open(os.path.join(out_dir, f'day{test_session}results{note}.pkl'), 'wb') as f:
         pickle.dump(dayresults, f)
 
-run_day(['2', '6'], '7')
-run_day(['2', '6'], '9')
-run_day(['2', '6'], '6')
+#run_day(['2', '6'], '7')
+#run_day(['2', '6'], '9')
+#run_day(['2', '6'], '6')
+
+run_day(['2', '6'], '7', test_pairs = (201, 240), note = '_shorttest')
+run_day(['2', '6'], '9', test_pairs = (201, 240), note = '_shorttest')
