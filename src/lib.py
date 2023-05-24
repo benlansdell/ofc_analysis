@@ -5,7 +5,6 @@ from collections import defaultdict
 from sklearn.metrics import f1_score, accuracy_score
 from sklearn.model_selection import GroupKFold, cross_val_predict, GridSearchCV
 
-#%%%
 def run_analysis(df, 
                  conditions, 
                  sessions, 
@@ -79,14 +78,9 @@ def run_analysis(df,
 
             #Perform group level CV
             splitter = GroupKFold(n_splits = n_folds)
-            #scores = cross_validate(classifier, X, y, 
-            #                        groups = groups, 
-            #                        cv = splitter,
-            #                        return_train_score=True)
             search = GridSearchCV(classifier, param_grid, n_jobs=16, cv = splitter)
             search.fit(X, y, groups = groups)
             
-            #train_accuracy = np.mean(scores['train_score'])
             val_accuracy = search.best_score_
 
             preds = cross_val_predict(search.best_estimator_, X, y, groups = groups, cv = splitter)
