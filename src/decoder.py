@@ -65,9 +65,9 @@ def run_day(train_sessions, test_session, time_pairs = (201, 240), test_pairs = 
     with open(os.path.join(out_dir, f'day{test_session}results{note}.pkl'), 'wb') as f:
         pickle.dump(dayresults, f)
 
-#run_day(['2', '6'], '7')
-#run_day(['2', '6'], '9')
-#run_day(['2', '6'], '6')
+run_day(['2', '6'], '7', time_pairs = (201, 280), note = '_280')
+run_day(['2', '6'], '9', time_pairs = (201, 280), note = '_280')
+run_day(['2', '6'], '6', time_pairs = (201, 280), note = '_280')
 
-run_day(['2', '6'], '7', test_pairs = (201, 240), note = '_shorttest')
-run_day(['2', '6'], '9', test_pairs = (201, 240), note = '_shorttest')
+# run_day(['2', '6'], '7', test_pairs = (201, 240), note = '_shorttest')
+# run_day(['2', '6'], '9', test_pairs = (201, 240), note = '_shorttest')

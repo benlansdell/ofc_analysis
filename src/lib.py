@@ -211,6 +211,7 @@ def run_decoder(df,
 
     ave_resultsday = {k:v[0].val_accuracy.mean() for k,v in day_results.items()}
     results_summary = day_results[("Pipeline(steps=[('scaler', StandardScaler()), ('pca', PCA(n_components=20)),\n                ('lda', LinearDiscriminantAnalysis())])", (201, 240))]
+    #results_summary = day_results[("Pipeline(steps=[('scaler', StandardScaler()), ('pca', PCA(n_components=20)),\n                ('lda', LinearDiscriminantAnalysis())])", (201, 280))]
 
     return ave_resultsday, day_results, results_summary
 
