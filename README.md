@@ -42,13 +42,9 @@ Run through `mutual_information.ipynb`.
 
 ### 3 Decoder analyses
 
-Run `decoder.py`. You can do this from within a terminal with
+Decoder results are saved in repo, allowing you to make plots with `decoder_analysis_plots.ipynb` and `decoder_sample_plots.ipynb`.
+
+You can run the decoder with `decoder.py`. You can do this from within a terminal with
 ```
 python src/decoder.py
 ```
-Or from within a notebook with: 
-```
-%run src/decoder.py
-```
-
-After this, you can make plots with `decoder_analysis_plots.ipynb`.
