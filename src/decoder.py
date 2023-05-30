@@ -69,5 +69,5 @@ run_day(['2', '6'], '7', time_pairs = (201, 280), note = '_280')
 run_day(['2', '6'], '9', time_pairs = (201, 280), note = '_280')
 run_day(['2', '6'], '6', time_pairs = (201, 280), note = '_280')
 
-# run_day(['2', '6'], '7', test_pairs = (201, 240), note = '_shorttest')
-# run_day(['2', '6'], '9', test_pairs = (201, 240), note = '_shorttest')
+run_day(['2', '6'], '7', test_pairs = (201, 240))
+run_day(['2', '6'], '9', test_pairs = (201, 240))
