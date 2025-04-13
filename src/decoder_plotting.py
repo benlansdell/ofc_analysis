@@ -18,7 +18,7 @@ def plot_accuracy_by_group(test_accuracy_by_group, group_to_maze_choice, fn_in):
     fig, ax = plt.subplots(1,1,figsize=(10,5))
     ax.bar(range(len(test_accuracy_by_group)), vals)
     #Change x labels to be the keys
-    ax.set_xticks(range(len(test_accuracy_by_group)), trial_names, rotation=45);
+    ax.set_xticks(range(len(test_accuracy_by_group)), trial_names, rotation=45)
 
     #Plot the maze choice for each group as a vspan for when maze_choice is 1
     for i, (k, v) in enumerate(group_to_maze_choice.items()):
@@ -28,5 +28,7 @@ def plot_accuracy_by_group(test_accuracy_by_group, group_to_maze_choice, fn_in):
     ax.set_xlabel('Day/trial')
     ax.set_ylabel('Accuracy')
     ax.set_title("Accuracy by day/trial and maze choice (red = left)")
-    fig.suptitle(fn_in.split('/')[-1].split('.')[0])
+    animal_name = fn_in.split('/')[-1].split('.')[0].split('results_animal_')[1]
+    fig.suptitle(animal_name)
+    # fig.suptitle(fn_in.split('/')[-1].split('.')[0])
     

@@ -18,14 +18,19 @@ sample_dirs = ['/home/blansdel/projects/schwarz/decoder/Retracked/Control Animal
         '/home/blansdel/projects/schwarz/decoder/Retracked/Control Animal 10',
         '/home/blansdel/projects/schwarz/decoder/Retracked/Control Animal M3',
         '/home/blansdel/projects/schwarz/decoder/Retracked/Clonidine Animal F4',
-        '/home/blansdel/projects/schwarz/decoder/Retracked/IDX Animal F3']
+        '/home/blansdel/projects/schwarz/decoder/Retracked/Clonidine Animal 83',
+        '/home/blansdel/projects/schwarz/decoder/Retracked/IDX Animal F3',
+        '/home/blansdel/projects/schwarz/decoder/Retracked/IDX Animal 80',
+        ]
 
 training_reward_by_animal = {
     'Control Animal 1': 'left',
     'Control Animal 10': 'right',
     'Control Animal M3': 'left',
     'IDX Animal F3': 'left',
-    'Clonidine Animal F4': 'left'
+    'Clonidine Animal F4': 'left',
+    'IDX Animal 80': 'right',
+    'Clonidine Animal 83': 'left'
 }
 
 output_dir = './retracked_results/'
