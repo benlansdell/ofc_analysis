@@ -18,14 +18,19 @@ sample_dirs = ['/home/blansdel/projects/schwarz/decoder/Retracked/Control Animal
         '/home/blansdel/projects/schwarz/decoder/Retracked/Control Animal 10',
         '/home/blansdel/projects/schwarz/decoder/Retracked/Control Animal M3',
         '/home/blansdel/projects/schwarz/decoder/Retracked/Clonidine Animal F4',
-        '/home/blansdel/projects/schwarz/decoder/Retracked/IDX Animal F3']
+        '/home/blansdel/projects/schwarz/decoder/Retracked/Clonidine Animal 83',
+        '/home/blansdel/projects/schwarz/decoder/Retracked/IDX Animal F3',
+        '/home/blansdel/projects/schwarz/decoder/Retracked/IDX Animal 80',
+        ]
 
 training_reward_by_animal = {
     'Control Animal 1': 'left',
     'Control Animal 10': 'right',
     'Control Animal M3': 'left',
     'IDX Animal F3': 'left',
-    'Clonidine Animal F4': 'left'
+    'Clonidine Animal F4': 'left',
+    'IDX Animal 80': 'right',
+    'Clonidine Animal 83': 'left'
 }
 
 output_dir = './retracked_results/'
@@ -35,6 +40,11 @@ available_animals = [t.replace(' ', '_') for t in training_reward_by_animal.keys
 def main(args):
 
     animal = args.animal
+
+    assert animal in available_animals
+    animal = animal.replace('_', ' ')
+    print(animal)
+
     training_reward = training_reward_by_animal[animal]
 
     files = []
@@ -43,11 +53,12 @@ def main(args):
 
     animal_to_files = {}
     for fn in files:
-        animal = fn.split('/')[-2]
-        if animal not in animal_to_files:
-            animal_to_files[animal] = []
-        animal_to_files[animal].append(fn)
+        a = fn.split('/')[-2]
+        if a not in animal_to_files:
+            animal_to_files[a] = []
+        animal_to_files[a].append(fn)
 
+    print(f"Loading animal: {animal}")
     df = load_animal(animal, animal_to_files)
 
     print(f"Training on {training_reward}, testing on the other side")
@@ -70,8 +81,8 @@ def main(args):
         with open(fn_out, 'wb') as f:
             pickle.dump(hyper_param_results, f)
 
-    for key, value in hyper_param_results.items():
-        print(key, f"test acc: {value['test_accs']}, train acc: {value['train_accs']}")
+        for key, value in hyper_param_results.items():
+            print(key, f"test acc: {value['test_accs']}, train acc: {value['train_accs']}")
 
     if args.runlogo:
         results_left = train_logo(df, reward=training_reward)
@@ -80,7 +91,7 @@ def main(args):
             pickle.dump(results_left, f)
 
 parser = argparse.ArgumentParser(description='Run retracked decoder')
-parser.add_argument('animal', type=str, nargs='+',
+parser.add_argument('animal', type=str,
                     help='Animal to analyze')
 parser.add_argument('--runlogo', action='store_true',
                     default=False,
