@@ -78,11 +78,14 @@ def train_one_side_test_other(df_all, hyper_params, train_reward = 'left', do_sh
     X_train, X_test = X[train_index], X[test_index]
     y_train, y_test = y[train_index], y[test_index]
     
+    train_groups = groups[train_index].reset_index(drop = True)
+
     test_groups = groups[test_index].reset_index(drop = True)
     test_events = events[test_index].reset_index(drop = True)
     trial_choice = df_wide['maze_choice']
     trial_choice_test = trial_choice[test_index].reset_index(drop = True)
     test_group_names = test_groups.unique()
+    train_group_names = train_groups.unique()
    
     pca = PCA(n_components=n_pcs)
     X_train_pca = pca.fit_transform(X_train)
@@ -109,10 +112,16 @@ def train_one_side_test_other(df_all, hyper_params, train_reward = 'left', do_sh
         test_group_accuracy = accuracy_score(y_test_kmeans[test_group_index], y_pred_test[test_group_index])
         test_accuracy_by_group[group] = test_group_accuracy
     
+    train_accuracy_by_group = {}
+    for group in train_group_names:
+        train_group_index = train_groups[train_groups == group].index
+        train_group_accuracy = accuracy_score(y_train_kmeans[train_group_index], y_pred_train[train_group_index])
+        train_accuracy_by_group[group] = train_group_accuracy
+    
     test_accs.append(test_accuracy)
     train_accs.append(train_accuracy)
 
-    n_resamples = 50
+    n_resamples = 1000
     if do_shuffling:
 
         y_train_kmeans_shuffled = y_train_kmeans.copy()
