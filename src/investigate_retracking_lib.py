@@ -12,7 +12,7 @@ from tqdm import tqdm
 from sklearn.decomposition import PCA
 from sklearn.cluster import KMeans
 from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import accuracy_score
+from sklearn.metrics import accuracy_score, f1_score
 import pandas as pd
 
 
@@ -107,16 +107,21 @@ def train_one_side_test_other(df_all, hyper_params, train_reward = 'left', do_sh
     test_accuracy = accuracy_score(y_test_kmeans, y_pred_test)
     
     test_accuracy_by_group = {}
+    test_f1_by_group = {}
     for group in test_group_names:
         test_group_index = test_groups[test_groups == group].index
         test_group_accuracy = accuracy_score(y_test_kmeans[test_group_index], y_pred_test[test_group_index])
         test_accuracy_by_group[group] = test_group_accuracy
+        test_f1_by_group[group] = f1_score(y_test_kmeans[test_group_index], y_pred_test[test_group_index], average='weighted')
     
     train_accuracy_by_group = {}
+    train_f1_by_group = {}
     for group in train_group_names:
         train_group_index = train_groups[train_groups == group].index
         train_group_accuracy = accuracy_score(y_train_kmeans[train_group_index], y_pred_train[train_group_index])
+        train_group_f1 = f1_score(y_train_kmeans[train_group_index], y_pred_train[train_group_index], average='weighted')
         train_accuracy_by_group[group] = train_group_accuracy
+        train_f1_by_group[group] = train_group_f1
     
     test_accs.append(test_accuracy)
     train_accs.append(train_accuracy)
@@ -140,14 +145,26 @@ def train_one_side_test_other(df_all, hyper_params, train_reward = 'left', do_sh
         train_accs_shuffled.append(np.mean(train_accs_shuffled_og))
         test_accs_shuffled.append(np.mean(test_accs_shuffled_og))
         
+        train_accs_shuffled_all = train_accs_shuffled_og
+        test_accs_shuffled_all = test_accs_shuffled_og
+    else:
+        train_accs_shuffled_all = 0
+        test_accs_shuffled_all = 0
+        
+        
     print("Train accuracy: ", np.mean(train_accs))
     print("Test accuracy: ", np.mean(test_accs))
     print("Test accuracy shuffled", np.mean(test_accs_shuffled))
 
     results = {'train_accs': train_accs, 
                'test_accs': test_accs, 
+               'train_accs_shuffled_all': train_accs_shuffled_all,
+               'test_accs_shuffled_all': test_accs_shuffled_all,
                'test_accs_shuffled': test_accs_shuffled, 
                'test_accuracy_by_group': test_accuracy_by_group,
+               'test_f1_by_group': test_f1_by_group,
+               'train_accuracy_by_group': train_accuracy_by_group,
+               'train_f1_by_group': train_f1_by_group,
                'y_test_kmeans': y_test_kmeans,
                'y_pred_test': y_pred_test,
                'test_groups': test_groups,
