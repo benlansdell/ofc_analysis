@@ -1,0 +1,296 @@
+---
+title: "ROC analysis"
+output: html_notebook
+params:
+  fn: 'final_010721.Rds'
+  events_of_interest: ['lspout_first', 'rspout_first']
+---
+
+Imports
+```{r}
+library(hash)
+library(ROCR)
+library(data.table)
+library(ggplot2)
+
+source('helper.R')
+```
+
+Set local working directory (change to your own) and path to the data
+```{r}
+setwd("~/roc_cell_analysis")
+path = '/media/core/core_operations/ImageAnalysisScratch/Schwarz/Cameron/ImagingData2/'
+list.files(path)
+```
+
+## ROC analysis for cells
+
+In this notebook:
+* Perform ROC analysis on single recording to compute responsiveness score (RS)
+* Plot traces aligned to events of interest, sorted by RS
+
+### Load the data
+
+Here
+```{r}
+print(sprintf("Recording: %s and events of interest:", params$fn))
+print(params$events_of_interest)
+```
+
+Change these parameters in the notebook header above, if desired
+```{r}
+fn = params$fn                                  #The recording file to analyze
+events_of_interest = params$events_of_interest  #Events to study 
+```
+
+Note this notebook can be saved as a html file with the command: `make_report('1_roc.Rmd', params)`
+This will run all cells in the notebook, with the specified parameters, and save the report to `1_roc-[fn]-[events_of_interest].html`.
+
+Load data
+```{r}
+dt = readRDS(paste(path, fn, sep = ''))
+ds = preprocess_dt(dt, events_of_interest)
+reward = dt[1,Reward]
+```
+
+The loaded data table
+```{r}
+ds
+```
+
+### Preprocessing of signal
+
+How much variability is there between trials for a given cell?
+```{r}
+a = ds[,.(mn = mean(dff), sd = sd(dff)), by = .(CellID, `Trial Number`)]
+a[CellID == 1]
+```
+
+Normalize (z-score)
+
+```{r}
+ds[, dff_zs := (dff - mean(dff))/sd(dff), by = `CellID`]
+ds
+```
+
+## ROC curves measuring responsiveness to events of interest
+
+### What is the ROC analysis?
+
+In this analysis the signal is treated as a binary classifier for the experimental state of interest. That is, if it is above a given amount then it counts as 1, otherwise 0. We can use this to generate an ROC curve, which indicates how well that cell classifies times as the event of interest. The ROC AUC is used as a measure of cell responsiveness. 
+
+Make a dictionary of ROC curves for each cellID
+```{r}
+roc_curves = hash()
+per_cell_ds = split(ds, f = ds$CellID)
+cells = unique(ds$CellID)
+```
+
+```{r}
+idx = 100
+p = plot_ly(data = ds[CellID == idx], x = ~frame, y = ~dff, type = "scatter", mode = "lines", name = 'dff') %>%
+    layout(title=sprintf("Cell #%s", idx)) %>% toWebGL()
+p = p %>% add_trace(data = ds[CellID == idx], x = ~frame, y = ~lspout_first, 
+                       type = 'scatter', mode = 'line+markers', name = 'lspout_first')
+p
+```
+
+Take an example cell and plot its histograms
+```{r}
+plot_single_roc = function(idx = 100, evt = 'lspout_first') {
+  ttl = paste('Cell:', idx, 'Event:', evt)
+  p <- per_cell_ds[[idx]] %>%
+    ggplot( aes(x=dff_zs, fill=as.character(lspout_first))) +
+      geom_histogram( color="#e9ecef", alpha=0.6, position = 'identity') +
+      scale_fill_manual(values=c("#69b3a2", "#404080")) +
+      labs(fill="", title = ttl)
+  print(p)
+  
+  dss = per_cell_ds[[idx]]
+  p = performance(prediction(dss$dff_zs, dss[,..evt]), "tpr", "fpr") 
+  q = performance(prediction(dss$dff_zs, dss[,..evt]), "auc") 
+  plot(p)
+  title(ttl)
+}
+```
+
+```{r}
+idx = 127
+evt = 'lspout_first'
+plot_single_roc(idx, evt)
+```
+
+```{r}
+idx = 100
+evt = 'lspout_first'
+plot_single_roc(idx, evt)
+```
+
+### Compute the ROC AUC for all cells
+
+```{r}
+for (evt in events_of_interest) {
+  for (dss in per_cell_ds) {
+    p = performance(prediction(dss$dff_zs, dss[,..evt]), "tpr", "fpr") 
+    q = performance(prediction(dss$dff_zs, dss[,..evt]), "auc") 
+    roc_curves[paste(evt, dss[1,CellID])] = list(p, q)
+  }
+}
+```
+
+Plot the ROC curves for all cells
+```{r fig1, fig.height = 6, fig.width = 6}
+for (evt in events_of_interest) {
+  plot(roc_curves[[paste(evt, '1')]][[1]])
+  lapply(cells, function(x) plot(roc_curves[[paste(evt,x)]][[1]], add = TRUE));
+  title(evt)
+}
+```
+
+### Generation of null-distributions for each cell
+
+Now, for each cell, we perform N random shifts of the signal, and recompute the AUC. This gives us a null distribution from which we can judge an AUC as significant or not. (In the paper [1], N = 1000)
+
+First, make a new data table to house the results of our analysis.
+```{r}
+dt_roc = data.table(CellID = cells)
+for (evt in events_of_interest){
+  aucs = sapply(cells, function(x) roc_curves[[paste(evt, x)]][[2]]@y.values[[1]])
+  dt_roc[,eval(paste(evt, 'AUC', sep = "_")) := aucs]
+}
+```
+
+```{r}
+dt_roc
+```
+
+Then confirm what the method looks like for a few cells.
+```{r}
+N = 50
+
+#Randomly select a cell
+#n_cells = 1
+#cell <- sample(unique(ds$CellID), n_cells, replace=F)
+
+#Or use the cell from above
+cell = 269
+
+#dss = ds[CellID == cell]
+dss = per_cell_ds[[idx]]
+
+for (evt in events_of_interest) {
+  aucs = c()
+  pred_real = performance(prediction(dss$dff_zs, dss[,..evt]), "tpr", "fpr")
+  plot(pred_real, colorize = TRUE)
+  colname = paste(evt, 'AUC', sep = "_")
+  for (j in 1:N) {
+    #Perform shuffle of data...
+    rand_idx = ceiling(runif(1, 0, length(dss$dff_zs)))
+    shuffle = cycle(dss$dff_zs, rand_idx)
+    pred = performance(prediction(shuffle, dss[,..evt]), "tpr", "fpr")
+    auc = performance(prediction(shuffle, dss[,..evt]), "auc")@y.values[[1]]
+    aucs = c(aucs, auc)
+    plot(pred, add = TRUE)
+  }
+  
+  this_auc = dt_roc[CellID == cell, ..colname]
+  quantile = sum(aucs < this_auc[[1]])/N
+  
+  plot(pred_real, colorize = TRUE, add = TRUE)
+  title(sprintf("Event: %s, Cell %s, AUC: %f, quantile: %f", evt, cell, this_auc, quantile))
+}
+```
+
+```{r}
+hist(aucs, breaks = 10)
+title(sprintf("Event: %s, Cell %s", evt, cell))
+```
+
+Now compute for all cells
+```{r}
+N = 1000
+null_rocs = compute_roc_par(per_cell_ds, events_of_interest, dt_roc, N)
+dt_roc = merge(dt_roc, null_rocs, by = 'CellID')
+dt_roc
+```
+
+Compute statistical significance of each cell's responsiveness score
+```{r}
+alpha = 0.05
+
+for (evt in events_of_interest) {
+  colname = paste('null_quantile', evt, sep = "_")
+  dss = dt_roc[,colname, with = FALSE]
+  dt_roc[,(paste(evt, 'pos_resp', sep='_')) := (dss > 1-alpha)]
+  dt_roc[,(paste(evt, 'neg_resp', sep='_')) := (dss < alpha)]
+}
+```
+
+### Summarize the significantly responding cells
+
+How many positively and negatively responding cells are there?
+```{r}
+dt_summ = data.table(category = character(), n = numeric())
+dt_summ = rbind(dt_summ, list('total', length(cells)))
+for (evt in events_of_interest) {
+  print(evt)
+  cn_pos = paste(evt, 'pos_resp', sep = '_')
+  cn_neg = paste(evt, 'neg_resp', sep = '_')
+  pos_resp = sum(dt_roc[[cn_pos]])
+  neg_resp = sum(dt_roc[[cn_neg]])
+  dt_summ = rbind(dt_summ, list(cn_pos, pos_resp))
+  dt_summ = rbind(dt_summ, list(cn_neg, neg_resp))
+  print(sprintf("Positively responding cells: %d", pos_resp))
+  print(sprintf("Negatively responding cells: %d", neg_resp))
+}
+
+print(sprintf("Out of %d cells", length(cells)))
+```
+
+### Plot activity of cells sorted by responsiveness
+
+```{r fig6, fig.height = 10, fig.width = 5}
+window = 1000
+
+for (evt in events_of_interest) {
+  trials = ds[event == evt, .SD[which.min(frame)], by = `Trial Number`]$`Trial Number`
+
+  dss = ds[frame_offset_event > -window & frame_offset_event < window & `Trial Number` %in% trials, .(`Mean activity` = mean(dff)), by = .(frame_offset_event, CellID)]
+
+  #Sort by responsiveness
+  dss = merge(dss, dt_roc, by='CellID')
+  colname = paste('null_quantile', evt, sep = "_")
+  rn_pos = paste(evt, 'pos_resp', sep = '_')
+  rn_neg = paste(evt, 'neg_resp', sep = '_')
+  null_quantile = dss[[colname]]
+  dss[,null_order := null_quantile]
+  n_pos = dt_summ[category == rn_pos, n]
+  n_neg = dt_summ[category == rn_neg, n]
+  total = dt_summ[category == 'total', n]
+
+  p = ggplot(dss, aes(x=frame_offset_event, y=reorder(CellID, null_order), fill = `Mean activity`)) +
+    geom_tile(show.legend = TRUE) +
+    geom_hline(aes(yintercept=n_neg + 0.5), color = "red") +
+    geom_hline(aes(yintercept=total - n_pos - 0.5), color = "blue") +
+    scale_fill_distiller(palette = "Spectral") +
+    theme(axis.ticks.y = element_blank(), axis.text.y = element_blank(), panel.grid.major = element_blank(), panel.grid.minor = element_blank(), panel.background = element_blank()) +
+    labs(title = sprintf("%s (averaged over %d trials; reward is on the %s)", evt, length(trials), reward), x = "Frame", y = "Cell")
+
+  print(p)
+}
+```
+Above the blue line are significantly positively responding cells, and below the red line are negatively responding cells.
+
+### Save ROC curves for this recording
+
+```{r}
+save_table(dt_roc, params)
+```
+
+### TODO
+
+* Correct for data imbalance?
+
+### References 
+
+[1] "Cortical Representations of Conspecific Sex Shape Social Behavior" Kingsbury et al 2020

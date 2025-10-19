@@ -1,0 +1,58 @@
+---
+title: "ROC multiple recordings"
+output:
+  html_document:
+    df_print: paged
+---
+
+## ROC analysis for cells across recordings
+
+In this notebook:
+* Perform ROC analysis on multiple recordings to compute responsiveness score (RS)
+
+Imports
+```{r}
+library(hash)
+library(data.table)
+library(ggplot2)
+library(plotly)
+library(htmltools)
+library(ROCR)
+
+source('helper.R')
+```
+
+Set local working directory (change to your own) and path to the data
+```{r}
+setwd("~/roc_cell_analysis")
+path = '/media/core/core_operations/ImageAnalysisScratch/Schwarz/Cameron/ImagingData_M30815/'
+```
+
+Set parameters for the analysis:
+```{r}
+events_of_interest = c('lspout_first','rspout_first','middle_left','middle_right')  #Events to study 
+N = 1000                                                #Number of null ROC curves to generate
+alpha = 0.05                                            #Alpha value to determine significance
+```
+
+```{r}
+recordings = list.files(path)
+```
+
+### Perform analysis
+
+Now we run the ROC analysis on all files and combine them into one results table.
+This will take ~5-10 minutes per recording.
+```{r}
+dt_roc = compute_all_rocs(path, recordings, events_of_interest, N, alpha)
+```
+
+```{r}
+dt_roc
+```
+
+Save the table
+```{r}
+fwrite(dt_roc,'./results/roc_analysis_full_match_M30815_update.csv')
+```
+
